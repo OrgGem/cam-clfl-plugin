@@ -49,3 +49,11 @@ Refresh/reinstall the cached plugin as required by your desktop host. This updat
 Developers build artifacts with `npm run package:plugin` and verify them with `npm run smoke:package`. The smoke test extracts the ZIP outside the checkout, launches its stdio runtime and UI, checks forced OS-vault custody and exercises the browser-opening action with a test browser stub. It does not sign in to a real Cloudflare account or install into a real ChatGPT desktop session.
 
 Sources: [package and marketplace guide](https://developers.openai.com/plugins/build/plugins), [desktop-only publication requirements](https://developers.openai.com/plugins/deploy/desktop-only).
+
+## Automatic publication from GitHub
+
+Pushes to `feat/local-first` or `main` run `.github/workflows/ci.yml`. After all verification passes, the publication job downloads the exact tested ZIPs, verifies their SHA256 checksums and updates the `marketplace` branch with the packaged plugin, downloadable ZIPs and `PUBLISH.json` source/run provenance. Pull requests and pushes to other branches only verify; a push to `marketplace` does not publish recursively. Superseded source revisions are skipped and publication jobs are serialized.
+
+No publishing secret is required: the publication job uses the repository's `GITHUB_TOKEN` with `contents: write`; verification remains read-only. Repository or organization policy must permit Actions to write to the distribution branch. Protect `marketplace` from manual changes because generated publication replaces its contents. Source stays on the development/main branches; generated commits are never pushed back into source.
+
+This pipeline publishes the Git marketplace only. It does not submit an application to OpenAI's public Directory or obtain review approval. Installations still need a marketplace upgrade and the host's plugin refresh/reinstall flow to receive new versions.
