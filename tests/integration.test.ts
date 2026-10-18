@@ -595,3 +595,40 @@ it("invalidates an approval when account production policy changes", async () =>
   );
   expect(backend.writes).toBe(0);
 });
+it("delegates account audit only with explicit credential access and current admin role", async () => {
+  const { audit } = await import("../packages/core/src/security");
+  await audit(
+    env,
+    "alice",
+    "private.login",
+    "00000000-0000-4000-8000-000000000001",
+  );
+  await audit(
+    env,
+    "alice",
+    "account.read",
+    "00000000-0000-4000-8000-000000000002",
+    target,
+  );
+  await env.DB.prepare("INSERT INTO sessions VALUES (?,?,?)")
+    .bind(await hash("bob-session"), "bob", now() + 60)
+    .run();
+  await env.DB.prepare(
+    "UPDATE memberships SET role='admin' WHERE user_id='bob'",
+  ).run();
+  const request = () =>
+    app.request(
+      env.APP_ORIGIN + "/api/audit",
+      { headers: { Cookie: "__Host-gem-session=bob-session" } },
+      env,
+    );
+  expect(await (await request()).json()).toEqual([]);
+  await env.DB.prepare("INSERT INTO access_grants VALUES (?,?,?,?,?)")
+    .bind("audit-read", "bob", target.connection_id, target.account_id, "read")
+    .run();
+  expect(await (await request()).json()).toMatchObject([
+    { action: "account.read" },
+  ]);
+  await env.DB.prepare("DELETE FROM access_grants").run();
+  expect(await (await request()).json()).toEqual([]);
+});

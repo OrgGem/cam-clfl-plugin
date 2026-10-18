@@ -626,6 +626,10 @@ function App() {
               }}
             >
               <label>
+                User ID
+                <input name="user_id" />
+              </label>
+              <label>
                 Account ID
                 <input name="account_id" />
               </label>

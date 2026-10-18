@@ -145,6 +145,7 @@ api.post("/operations/:id/decision", async (c) => {
 api.get("/audit", async (c) => {
   const q = z
     .object({
+      user_id: z.string().uuid().optional(),
       account_id: z
         .string()
         .regex(/^[a-f0-9]{32}$/)
@@ -156,15 +157,19 @@ api.get("/audit", async (c) => {
   return c.json(
     (
       await c.env.DB.prepare(
-        "SELECT * FROM audit_events WHERE user_id=? AND created_at>=? AND (? IS NULL OR account_id=?) AND (? IS NULL OR request_id=?) ORDER BY created_at DESC LIMIT 200",
+        `SELECT e.* FROM audit_events e WHERE (e.user_id=? OR EXISTS (SELECT 1 FROM cloudflare_connections c WHERE c.id=e.connection_id AND (c.owner_id=? OR (c.status='active' AND EXISTS (SELECT 1 FROM access_grants g JOIN memberships actor ON actor.user_id=g.user_id JOIN memberships owner ON owner.workspace_id=actor.workspace_id AND owner.user_id=c.owner_id JOIN connection_accounts a ON a.connection_id=c.id AND a.account_id=e.account_id WHERE g.user_id=? AND g.connection_id=c.id AND g.account_id=e.account_id AND g.permission='read' AND actor.role IN ('owner','admin') AND a.available=1))))) AND e.created_at>=? AND (? IS NULL OR e.account_id=?) AND (? IS NULL OR e.request_id=?) AND (? IS NULL OR e.user_id=?) ORDER BY e.created_at DESC LIMIT 200`,
       )
         .bind(
+          c.get("user"),
+          c.get("user"),
           c.get("user"),
           q.from,
           q.account_id ?? null,
           q.account_id ?? null,
           q.request_id ?? null,
           q.request_id ?? null,
+          q.user_id ?? null,
+          q.user_id ?? null,
         )
         .all()
     ).results,
