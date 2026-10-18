@@ -13,11 +13,9 @@ test("local connection manager targets two identities and approves production DN
   await expect(
     page.getByRole("heading", { name: "person2@example.com" }),
   ).toBeVisible();
-  const first = page
-    .locator("article")
-    .filter({
-      has: page.getByRole("heading", { name: "person1@example.com" }),
-    });
+  const first = page.locator("article").filter({
+    has: page.getByRole("heading", { name: "person1@example.com" }),
+  });
   await first.getByLabel("Alias").fill("production");
   await first.getByLabel("Environment").selectOption("production");
   await first
