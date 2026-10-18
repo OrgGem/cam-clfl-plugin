@@ -1,31 +1,35 @@
 {
   "name": "gem-cloudflare-manager",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "build": "vite build apps/control --outDir ../../dist/ui --emptyOutDir",
+    "dev": "tsx apps/local/src/cli.ts ui",
+    "build": "vite build apps/ui --outDir ../../dist/ui --emptyOutDir && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build && npm run validate:plugin",
-    "types": "wrangler types",
-    "db:local": "wrangler d1 migrations apply DB --local",
-    "test:e2e": "npm run build && node scripts/e2e-setup.mjs && playwright test",
+    "check": "npm run typecheck && npm test && npm run build && npm run validate:plugin && npm run smoke:stdio && npm run smoke:local",
+    "start": "node dist/node/apps/local/src/cli.js ui",
+    "mcp": "node dist/node/apps/local/src/cli.js mcp",
+    "test:e2e": "npm run build && playwright test",
     "validate:plugin": "node scripts/validate-plugin.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "smoke:stdio": "node scripts/smoke-stdio.mjs",
+    "smoke:local": "node scripts/smoke-local.mjs",
+    "package:plugin": "npm run build && node scripts/package-plugin.mjs",
+    "smoke:package": "node scripts/smoke-package.mjs"
   },
   "dependencies": {
+    "@hono/node-server": "^2.1.5",
     "@modelcontextprotocol/sdk": "^1.25.0",
+    "@napi-rs/keyring": "^2.1.1",
     "hono": "^4.11.0",
-    "jose": "^6.1.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "zod": "^4.3.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "latest",
     "@playwright/test": "^1.64.1",
     "@types/node": "^26.6.5",
     "@types/react": "^19.2.0",
@@ -33,11 +37,12 @@
     "@vitejs/plugin-react": "latest",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
-    "miniflare": "^4.20260730.0",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3",
     "prettier": "^3.9.10",
+    "tsx": "^4.23.15",
     "typescript": "latest",
     "vite": "latest",
-    "vitest": "latest",
-    "wrangler": "latest"
+    "vitest": "latest"
   }
 }

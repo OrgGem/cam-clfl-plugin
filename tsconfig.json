@@ -6,10 +6,16 @@
     "strict": true,
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM"],
-    "types": ["@cloudflare/workers-types"],
+    "types": ["node", "vite/client"],
     "skipLibCheck": true,
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["apps", "packages", "tests", "worker-configuration.d.ts"]
+  "include": [
+    "apps",
+    "packages",
+    "tests",
+    "playwright.config.ts",
+    "vitest.config.ts"
+  ]
 }

@@ -1,71 +1,61 @@
-# Vận hành
+# Local operations
 
-## Cấu hình staging
+## Credential storage
 
-1. Tạo Google OAuth web client với callback `https://YOUR_DOMAIN/auth/google/callback`. Cấu hình consent/test users theo chính sách Google. Chọn client type backend; secret chỉ ở Worker.
-2. Tạo Cloudflare OAuth client, Authorization Code, `client_secret_basic`, callback `https://YOUR_DOMAIN/auth/cloudflare/callback`. Lấy scope ID đúng từ `/client/v4/oauth/scopes`/dashboard: account discovery, zones/DNS read+edit, Workers scripts read, D1 read, Tunnel read, OIDC `openid` và `offline_access` để có userinfo/refresh token. Không dùng tên scope phỏng đoán. Đặt toàn bộ chuỗi vào `CF_SCOPES`.
-3. Client private chỉ cho thành viên account sở hữu client authorize. Với danh tính ngoài account đó, cần domain verification + public client. Chuyển public không đảo ngược: đây là quyết định triển khai của chủ account, không nằm trong migration hay script repo.
-4. Tạo D1 staging bằng `npx wrangler d1 create gem-cloudflare-manager-staging`; điền database ID thật vào config. Đặt `APP_ORIGIN` là HTTPS origin, không trailing slash; Google/Cloudflare client ID và `CF_SCOPES` thật. `MCP_CLIENT_ID` là ID được cấu hình cho ChatGPT custom OAuth; `MCP_REDIRECT_URIS` là allowlist callback chính xác, ngăn cách dấu phẩy. Lấy callback từ màn hình ChatGPT, không mặc định tin URL mẫu.
-5. Secret cho control: `GOOGLE_CLIENT_SECRET`, `CF_CLIENT_SECRET`, `CREDENTIAL_KEYS`. Gateway cần `CF_CLIENT_SECRET`, `CREDENTIAL_KEYS`. `CREDENTIAL_KEYS` là JSON map version → base64url 32 byte AES key, ví dụ `{"v1":"<random 32 bytes, base64url>"}`. `KEY_VERSION` chọn key đang dùng để ghi. Tạo key bằng CSPRNG; lưu bản sao trong secret manager, không commit hay đưa lên issue/chat.
+The production CLI uses `SystemVault` only: macOS Keychain, Windows credential backend or Linux Secret Service via `@napi-rs/keyring`. Linux explicitly pins `secret-service`, so the dependency's automatic volatile keyutils fallback is disabled. If the vault is locked/missing, unlock/configure it and retry; credentials are never written to a fallback file.
 
-Local dùng file `.dev.vars` bị ignore:
+The keyring service namespace is derived from the absolute data directory; entry IDs are connection UUIDs. Run UI and MCP as the same OS user with the same `GEM_DATA_DIR`. Changing directory does not move credentials. There is no master key to upload and no app login.
 
-```dotenv
-GOOGLE_CLIENT_SECRET="..."
-CF_CLIENT_SECRET="..."
-CREDENTIAL_KEYS='{"v1":"..."}'
-```
+The loopback browser sees connection metadata, authorized resource data and diffs, not OAuth access/refresh tokens. Credential-bearing requests are made by the Node companion directly to fixed Cloudflare HTTPS hosts. The browser talks only to loopback. This is client-side custody on the user's device, not a hosted proxy.
 
-Remote dùng `npx wrangler secret put NAME`. Với gateway thêm `--config wrangler.gateway.jsonc`. Không đặt secret vào `[vars]`. Dữ liệu secret không cần xuất hiện trên CLI output.
+## OAuth setup and reconnect
 
-## Triển khai
+Register a Cloudflare OAuth public client: token authentication `none`, authorization code, S256 PKCE and exact loopback callback. Obtain read/write scope IDs from Cloudflare's catalog, plus OIDC/refresh scopes needed for userinfo and a refresh token. Availability of loopback redirects and authorization by two different identities must be verified on the real client before release. No client secret is embedded in the application.
+
+Config is local and contains only client ID/scopes. An active connection prevents changing client ID until connections are revoked. Browser-bound OAuth state/verifier live only in the companion's memory for ten minutes; restarting the companion invalidates incomplete flows. Discovery is capped at 100 pages of 50 accounts. New/reconnected credentials require identity/account confirmation before use. Reconnect must have exactly the same Cloudflare subject; aliases for still-accessible accounts are retained, missing accounts are removed from the usable target list.
+
+Refresh occurs under the cross-process metadata lock. The journal checkpoints `refreshing` before calling the token endpoint. If refresh fails, use reconnect. A process crash during refresh may already have rotated the token, so `refreshing` after restart is not automatically retried. There is no fallback to another connection.
+
+Revoke persists local `revoked` status first, attempts upstream revocation and deletes the vault entry. If upstream revocation is unconfirmed, revoke in Cloudflare dashboard too. If vault deletion fails because it is locked, local resource access remains disabled; unlock and retry revoke to remove the credential.
+
+## Local UI and MCP
+
+`npm start` prints a one-time launch fragment on stderr and binds only `127.0.0.1`. Keep this private; after bootstrap the browser uses an HttpOnly SameSite=Strict session for eight hours. OAuth has a separate Lax state cookie so the external provider can return to loopback. The local API checks Host, exact Origin for mutations and a 64 KiB body limit. No CORS access or public `/mcp` endpoint is enabled.
+
+The stdio process exposes resource tools but not connection management, credential input or approval. Local stdio assumes the invoking process belongs to the trusted OS user. A same-user malicious process is outside this boundary, as it could also edit metadata or access the user's vault.
+
+Use `node /absolute/path/dist/node/apps/local/src/cli.js mcp` in the host, not npm's normal stdout-producing wrapper. Starting the companion UI does not expose local tools to ChatGPT web. A host supporting local stdio is required; no cloud tunnel is installed.
+
+## DNS journal and recovery
+
+Preview stores immutable target/payload/before-state plus a ten-minute approval deadline and idempotency UUID. Approval is only available in the authenticated local UI. Production requires the exact connection/account/zone string. Changing environment or upstream data invalidates the operation. DNS update uses PATCH to preserve unapproved comment/tag metadata.
+
+An exclusive local file lock serializes refresh and writes across companion/MCP processes. Atomic metadata replacement plus file/directory fsync (where supported) persists write intent before the network call. `applying` and `uncertain` operations only read/reconcile on replay; they never repeat mutation. An unresolved operation blocks another write to the same account/zone/name/type, including via another connection.
+
+A stopped process may leave `state.lock`. Close all UI/MCP instances, ensure the recorded process is stopped, then run exactly one recovery command:
 
 ```sh
-npm ci
-npm run check
-npx wrangler d1 export DB --remote --output /secure-backup/gem-before-migration.sql
-npx wrangler d1 migrations apply DB --remote
-npx wrangler deploy --dry-run
-npx wrangler deploy
+node dist/node/apps/local/src/cli.js recover-lock
 ```
 
-Lần đầu DB trống không cần export. D1/Wrangler lưu migration ledger; chạy lại `migrations apply` không chạy lại ALTER. Không chạy từng SQL migration thủ công trên DB đã có ledger.
+Recovery refuses an active or unknown lock owner. It does not reset operation states. Restart and reconcile using the same operation ID. Never edit `applying` back to `approved` or create another write merely because the old result is uncertain. Cloudflare cannot atomically transact the local check and an external client's write, so external edits can still race.
 
-Để tách gateway: điền cùng D1 ID và origin vào `wrangler.gateway.jsonc`, đặt hai secret gateway, deploy bằng `npx wrangler deploy --config wrangler.gateway.jsonc`. Cấu hình Workers route **chính xác** `YOUR_DOMAIN/mcp` tới gateway; control giữ domain và OAuth metadata. Gateway không cần browser session, Google secret hay assets. Kiểm tra request metadata/resource đều trỏ cùng HTTPS origin. Khi đổi scope/keyring, đồng bộ hai service trước khi chuyển `KEY_VERSION`.
+API readback is separate from DNS propagation. Check authoritative/public resolution after appropriate TTL and consider proxy/delegation behavior; there is no universal propagation delay.
 
-Production phải có Worker names, domain, OAuth clients, secrets và D1 khác staging. Tạo config production riêng từ template staging, không tái sử dụng database ID. Không chạy fixture E2E với `--remote`. CI chỉ build/test, deployment do operator thực hiện sau khi checklist đạt.
+## Backup and retention
 
-## Onboarding
+Stop companion and MCP before backing up the local directory. The state file contains DNS data/diffs and journal history and is owner-readable on POSIX; use a private directory with user-only ACLs on Windows. Back up credentials through the operating system's supported secure mechanism, not a token JSON export. Avoid network-synced data directories; the lock protocol assumes one local filesystem.
 
-1. Đăng nhập Google, vào Connections → Add connection, authorize Cloudflare.
-2. Đọc identity và account ID được discovery; Confirm chỉ khi đúng. Các connection chưa confirm không dùng được cho tài nguyên.
-3. Đặt alias và environment trên Accounts. Đặt production để bắt buộc nhập `connection_id/account_id/zone_id` khi duyệt.
-4. Owner tạo invitation theo email; recipient đăng nhập và Accept trên Users & Access. Owner credential cấp grant rõ cho từng account; read và DNS là hai grant riêng. Viewer chỉ đọc dù còn grant DNS; Operator/Admin/Owner vẫn cần grant credential của người khác.
-5. Trên ChatGPT Plugins, Add custom MCP server `https://YOUR_DOMAIN/mcp`, cấu hình OAuth authorization/token endpoint theo discovery và client ID/redirect URI allowlist; đăng nhập Google trước khi mở consent nếu browser chưa có session. Consent token có hạn 1 giờ; hết hạn kết nối lại. MVP chưa có refresh token cho ChatGPT.
-6. Thay URL trong `plugin/mcp.json`, kiểm tra `npm run validate:plugin`, cài package theo host/plugin marketplace. Nếu ChatGPT yêu cầu connector mapping `plugin_asdk_app...`, dùng ID nhận từ bước đăng ký thật trong metadata OpenAI; không tạo ID giả.
+Restoring an old journal can resurrect approved or completed operations. Before reopening, revoke/reconnect credentials and retain/mark all unexecuted restored operations for investigation; compare upstream state before any new preview. Do not restore a journal and blindly apply old approvals. Preserve uncertain write entries until reconciled. No automatic retention scheduler is included; future compaction must preserve idempotency keys and unresolved operations.
 
-## Approval và DNS
+For support, share sanitized action/request IDs, never the launch URL, browser cookie, OAuth callback URL, token, vault contents or complete DNS TXT payloads.
 
-ChatGPT tạo preview với UUID idempotency key. UI hiển thị diff, account/connection/zone và hạn duyệt. Người tạo operation đăng nhập UI để approve; MVP không có approver thay thế. ChatGPT gọi apply chỉ bằng operation ID. Operation quá hạn hoặc dữ liệu đổi phải preview mới. Record rename/type change, xóa DNS và no-op bị chặn.
+## Explicit cloud deployment
 
-`uncertain`/`applying` không phải “chưa thực hiện”. Gọi lại apply cùng ID để đọc lại; không tự tạo operation khác, không reset state về approved. Nếu không xác minh được: operator đối chiếu API và audit, giữ lock, rồi xử lý thủ công có bằng chứng. Cloudflare DNS không cung cấp transaction/conditional write cho toàn quy trình; thay đổi ngoài ứng dụng vẫn có thể chen giữa lần kiểm tra và API write.
+If the owner explicitly accepts cloud credential custody, the CLI supports `GEM_CREDENTIAL_STORE=encrypted-file`. Set `GEM_DATA_DIR` to a private persistent cloud directory and supply `GEM_VAULT_KEY` as a 32-byte base64/base64url AES key through a runtime secret. The default remains the OS vault; missing/invalid cloud keys fail closed. UI/MCP metadata report cloud custody rather than claiming device-only storage.
 
-`verified:true` là API readback. Kiểm tra public DNS riêng bằng resolver/authoritative nameserver sau TTL phù hợp. DNS proxied trả IP Cloudflare; bản ghi chưa delegated không kiểm chứng được như production. Không dùng một độ trễ cố định cho mọi zone.
+This mode encrypts each credential with AES-256-GCM, a fresh IV and authenticated binding to its connection ID and vault directory. Metadata/journal remain separate. Keep the key outside the credential directory and outside Git. A private mode-0600 key file outside the vault can be used when explicitly operating a single-user cloud workspace; it is not a managed HSM, and a compromise/snapshot of the entire host may expose both key and ciphertext. Back up the master key separately: losing it requires reconnecting the Cloudflare identities. No automatic key rotation is implemented.
 
-## Reconnect, revoke, lỗi
+OpenAI's tunnel runtime API key is distinct from this application-generated encryption key. It must be issued by OpenAI for a principal with tunnel Read + Use; random generation cannot create a valid OpenAI credential. Reference it through `env:CONTROL_PLANE_API_KEY`, never embed it in a profile or repository. Session cloud environments are not an uptime or durable-storage guarantee; configure persistent hosting/supervision before relying on continuous access.
 
-- Reconnect cùng identity: không tự chuyển credential hoặc nâng quyền; subject phải trùng. Sau discovery, account không còn được cấp sẽ bị đánh dấu unavailable. Xác nhận lại identity/accounts; alias cũ giữ nguyên. Pending operations phải kiểm tra quyền lại.
-- Revoke: quyền local mất ngay; upstream revoke được báo riêng nếu chưa xác nhận được. Có thể thu hồi trực tiếp Cloudflare dashboard; lần request tiếp theo upstream có thể trả permission denied, app không thử credential khác.
-- 429: dừng gửi thêm request trên connection, backoff có jitter phía caller. Không retry DNS bằng operation ID mới. Pagination đọc mỗi trang 50; account discovery tối đa 5.000 account, vượt giới hạn yêu cầu thu hẹp scope.
-- Refresh concurrent: một connection chỉ có một refresh claim. Request cạnh tranh nhận 409 để retry sau. Crash/timeout trong refresh có thể đã rotate token: connection không tự replay refresh; reconnect. `refreshing` kéo dài cũng xử lý bằng reconnect.
-- Browser sign out chỉ xóa session browser. “Revoke all ChatGPT access tokens” vô hiệu toàn bộ MCP bearer của user ngay request tiếp theo.
-
-## Key rotation, retention và recovery
-
-1. Sao lưu DB + keyring cũ theo cơ chế riêng, hạn chế quyền đọc backup. DB chứa credential ciphertext; mất key thì không khôi phục được credential.
-2. Thêm key mới vào `CREDENTIAL_KEYS` trên cả hai Worker, giữ các key cũ. Sau đó đổi `KEY_VERSION`. Connection refresh/reconnect sẽ được mã hóa lại bằng key mới. Chỉ bỏ key cũ sau khi DB không còn row dùng version đó và backup policy cho phép.
-3. Trước migration remote: export D1, ghi commit/version đang chạy. Test restore vào D1 staging riêng; giữ origin/clients staging để không dùng nhầm token production. Nếu migration lỗi, dừng writes, kiểm tra migration ledger; forward-fix hoặc restore DB vào database mới rồi đổi binding cả hai Worker. Không rollback SQL tùy ý giữa lúc gateway đang nhận write.
-4. Restore backup cũ có thể phục hồi approval hoặc token đã thu hồi. Trước khi mở lại writes: xóa `sessions`, `access_tokens`, `oauth_codes`, `oauth_sessions`; chuyển pending/approved/applying/uncertain operations sang trạng thái cần điều tra (không tự chạy lại), thu hồi/reconnect credential có refresh rotation không khớp. Đối chiếu upstream DNS trước khi bỏ lock. Audit của DB mới chỉ chứng minh đến thời điểm backup.
-5. MVP chưa có scheduler retention. Định kỳ xóa session/code/token/state hết hạn bằng SQL có điều kiện thời gian; giữ operations/approvals/audit theo chính sách doanh nghiệp. Chỉ xóa API lease quá hạn, không xóa lock DNS uncertain để “sửa lỗi”. Giám sát D1 size, rows read/write, CPU, latency, 429 và refresh errors trước khi chọn gói.
-
-Nguồn đối chiếu: [Workers best practices](https://developers.cloudflare.com/workers/best-practices/workers-best-practices/), [Cloudflare OAuth client](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/), [OAuth endpoints](https://developers.cloudflare.com/fundamentals/oauth/integrate-with-cloudflare/), [OpenAI MCP authentication](https://developers.openai.com/plugins/build/auth), [Plugin packaging](https://developers.openai.com/plugins/build/plugins).
+The admin UI still binds loopback. A cloud host needs a protected operator access path and an OAuth redirect that actually reaches that host before real connection management is usable. A local readiness check or empty MCP account list does not establish browser access, Cloudflare OAuth or a successful ChatGPT tool call.

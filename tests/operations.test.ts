@@ -1,0 +1,215 @@
+import { randomUUID } from "node:crypto";
+import { it, expect } from "vitest";
+import { fixture } from "./fixture.js";
+import { Operations } from "../packages/local/src/operations.js";
+const dns = {
+  type: "A",
+  name: "test.example.com",
+  content: "192.0.2.1",
+  ttl: 1,
+  proxied: false,
+};
+async function setup() {
+  const f = await fixture(),
+    connection = await f.connect(),
+    ops = new Operations(f.manager);
+  const input = {
+    connection_id: connection.id,
+    account_id: "a".repeat(32),
+    zone_id: "d".repeat(32),
+    record: dns,
+    idempotency_key: randomUUID(),
+  };
+  return { ...f, connection, ops, input };
+}
+it("requires local approval and persists exactly-once intent across new process objects", async () => {
+  const f = await setup();
+  try {
+    const op = await f.ops.preview(f.input, "r");
+    await expect(f.ops.apply(op.id, "r")).rejects.toThrow(
+      "valid_local_approval_required",
+    );
+    await f.ops.decide(op.id, "approve", "", "r");
+    const [a, b] = await Promise.all([
+      f.ops.apply(op.id, "r1"),
+      new Operations(f.manager).apply(op.id, "r2"),
+    ]);
+    expect(a.status).toBe("succeeded");
+    expect(b.status).toBe("succeeded");
+    expect(f.backend.writes).toBe(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("reconciles a timeout after commit without another write", async () => {
+  const f = await setup();
+  try {
+    const op = await f.ops.preview(f.input, "r");
+    await f.ops.decide(op.id, "approve", "", "r");
+    f.backend.timeout = true;
+    expect((await f.ops.apply(op.id, "r")).status).toBe("succeeded");
+    await f.ops.apply(op.id, "r");
+    expect(f.backend.writes).toBe(1);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("reconciles a crash-marked applying operation without writing", async () => {
+  const f = await setup();
+  try {
+    const op = await f.ops.preview(f.input, "r");
+    await f.manager.store.transaction(async (s) => {
+      s.operations[0].status = "applying";
+    });
+    expect((await new Operations(f.manager).apply(op.id, "r")).status).toBe(
+      "uncertain",
+    );
+    expect(f.backend.writes).toBe(0);
+    await expect(
+      f.ops.preview(
+        {
+          ...f.input,
+          idempotency_key: f.input.idempotency_key,
+          record: { ...dns, content: "192.0.2.2" },
+        },
+        "r",
+      ),
+    ).rejects.toThrow("idempotency_payload_mismatch");
+  } finally {
+    await f.cleanup();
+  }
+});
+it("blocks revoked credentials and changed production policy after approval", async () => {
+  const f = await setup();
+  try {
+    const op = await f.ops.preview(f.input, "r");
+    await f.ops.decide(op.id, "approve", "", "r");
+    await f.manager.updateAccount({
+      connection_id: f.connection.id,
+      account_id: f.input.account_id,
+      alias: "prod",
+      environment: "production",
+    });
+    await expect(f.ops.apply(op.id, "r")).rejects.toThrow(
+      "policy_changed_preview_again",
+    );
+    await f.manager.revoke(f.connection.id);
+    await expect(f.ops.apply(op.id, "r")).rejects.toThrow(
+      "connection_not_active",
+    );
+    expect(f.backend.writes).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("requires exact production target and detects upstream changes", async () => {
+  const f = await setup();
+  try {
+    await f.manager.updateAccount({
+      connection_id: f.connection.id,
+      account_id: f.input.account_id,
+      alias: "prod",
+      environment: "production",
+    });
+    const op = await f.ops.preview(f.input, "r");
+    await expect(f.ops.decide(op.id, "approve", "prod", "r")).rejects.toThrow(
+      "production_target_confirmation_required",
+    );
+    await f.ops.decide(
+      op.id,
+      "approve",
+      `${op.connection_id}/${op.account_id}/${op.zone_id}`,
+      "r",
+    );
+    f.backend.records.set(f.input.zone_id, [
+      { ...dns, id: "f".repeat(32), content: "192.0.2.2" },
+    ]);
+    expect((await f.ops.apply(op.id, "r")).status).toBe("conflict");
+    expect(f.backend.writes).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("patches only approved fields and preserves comment/tags", async () => {
+  const f = await setup();
+  try {
+    f.backend.records.set(f.input.zone_id, [
+      {
+        ...dns,
+        id: "f".repeat(32),
+        comment: "keep",
+        tags: ["team:lab"],
+        modified_on: "0",
+      },
+    ]);
+    const op = await f.ops.preview(
+      {
+        ...f.input,
+        record_id: "f".repeat(32),
+        record: { ...dns, content: "192.0.2.2" },
+      },
+      "r",
+    );
+    await f.ops.decide(op.id, "approve", "", "r");
+    expect((await f.ops.apply(op.id, "r")).status).toBe("succeeded");
+    expect(f.backend.records.get(f.input.zone_id)?.[0]).toMatchObject({
+      comment: "keep",
+      tags: ["team:lab"],
+    });
+    expect(f.backend.calls.find((c) => c.method === "PATCH")).toBeTruthy();
+  } finally {
+    await f.cleanup();
+  }
+});
+
+it("blocks a different connection from bypassing an uncertain upstream target", async () => {
+  const f = await setup();
+  try {
+    const first = await f.ops.preview(f.input, "r");
+    await f.store.transaction(async (s) => {
+      s.operations[0].status = "applying";
+    });
+    await f.ops.apply(first.id, "r");
+    const second = await f.connect();
+    await f.store.transaction(async (s) => {
+      s.connections
+        .find((c) => c.id === second.id)!
+        .accounts.push({
+          id: f.input.account_id,
+          name: "Shared upstream account",
+          alias: "shared",
+          environment: "lab",
+        });
+    });
+    const other = await f.ops.preview(
+      { ...f.input, connection_id: second.id, idempotency_key: randomUUID() },
+      "r",
+    );
+    await f.ops.decide(other.id, "approve", "", "r");
+    await expect(f.ops.apply(other.id, "r")).rejects.toThrow(
+      "dns_target_uncertain",
+    );
+    expect(f.backend.writes).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});
+it("rejects wrong-zone ownership and expired approval before any write", async () => {
+  const f = await setup();
+  try {
+    await expect(
+      f.ops.preview({ ...f.input, zone_id: "e".repeat(32) }, "r"),
+    ).rejects.toThrow("zone_account_mismatch");
+    const op = await f.ops.preview(f.input, "r");
+    await f.ops.decide(op.id, "approve", "", "r");
+    await f.store.transaction(async (s) => {
+      s.operations[0].expires_at = 0;
+    });
+    await expect(f.ops.apply(op.id, "r")).rejects.toThrow(
+      "valid_local_approval_required",
+    );
+    expect(f.backend.writes).toBe(0);
+  } finally {
+    await f.cleanup();
+  }
+});

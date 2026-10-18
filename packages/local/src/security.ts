@@ -1,0 +1,99 @@
+import { createHash, randomBytes } from "node:crypto";
+import { z } from "zod";
+export class Fault extends Error {
+  constructor(
+    public status: number,
+    public code: string,
+  ) {
+    super(code);
+  }
+}
+export const now = () => Math.floor(Date.now() / 1000);
+export const opaque = () => randomBytes(32).toString("base64url");
+export const hash = (s: string) =>
+  createHash("sha256").update(s).digest("base64url");
+export const targetSchema = z
+  .object({
+    connection_id: z.uuid(),
+    account_id: z.string().regex(/^[a-f0-9]{32}$/),
+  })
+  .strict();
+export const zoneSchema = targetSchema.extend({
+  zone_id: z.string().regex(/^[a-f0-9]{32}$/),
+  page: z.number().int().min(1).max(1000).default(1),
+});
+export const dnsSchema = z
+  .object({
+    type: z.enum(["A", "AAAA", "CNAME", "TXT", "MX"]),
+    name: z
+      .string()
+      .min(1)
+      .max(253)
+      .transform((s) => s.toLowerCase().replace(/\.$/, ""))
+      .pipe(z.string().regex(/^[a-z0-9_*-]+(?:\.[a-z0-9_*-]+)*$/)),
+    content: z.string().min(1).max(2048),
+    ttl: z
+      .number()
+      .int()
+      .refine((n) => n === 1 || (n >= 60 && n <= 86400)),
+    proxied: z.boolean().default(false),
+    priority: z.number().int().min(0).max(65535).optional(),
+  })
+  .strict()
+  .superRefine((v, c) => {
+    if (v.type === "A" && !z.ipv4().safeParse(v.content).success)
+      c.addIssue({ code: "custom", message: "Invalid IPv4" });
+    if (v.type === "AAAA" && !z.ipv6().safeParse(v.content).success)
+      c.addIssue({ code: "custom", message: "Invalid IPv6" });
+    if (v.type === "MX" && v.priority === undefined)
+      c.addIssue({ code: "custom", message: "MX requires priority" });
+    if (v.type !== "MX" && v.priority !== undefined)
+      c.addIssue({ code: "custom", message: "Priority is only for MX" });
+    if (v.proxied && !["A", "AAAA", "CNAME"].includes(v.type))
+      c.addIssue({ code: "custom", message: "Type cannot be proxied" });
+  });
+export type Target = z.infer<typeof targetSchema>;
+export type DNS = z.infer<typeof dnsSchema>;
+export function canonical(value: unknown): string {
+  if (Array.isArray(value)) return "[" + value.map(canonical).join(",") + "]";
+  if (value && typeof value === "object")
+    return (
+      "{" +
+      Object.entries(value)
+        .sort(([a], [b]) => a.localeCompare(b))
+        .map(([k, v]) => JSON.stringify(k) + ":" + canonical(v))
+        .join(",") +
+      "}"
+    );
+  return JSON.stringify(value);
+}
+export async function boundedJson(
+  r: Response,
+  limit = 2 * 1024 * 1024,
+): Promise<unknown> {
+  const reader = r.body?.getReader();
+  if (!reader) throw new Fault(502, "upstream_empty_response");
+  const chunks: Uint8Array[] = [];
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > limit) {
+        await reader.cancel();
+        throw new Fault(502, "upstream_response_too_large");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(size);
+  let at = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, at);
+    at += chunk.byteLength;
+  }
+  return JSON.parse(new TextDecoder().decode(bytes));
+}

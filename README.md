@@ -1,64 +1,87 @@
-# Gem Cloudflare Manager
+# Gem Cloudflare Local
 
-Plugin MCP multi-user/multi-account cho Cloudflare, TypeScript + Hono + React + Workers + D1. Repo triển khai MVP ứng viên; **chưa nghiệm thu OAuth/ChatGPT hoặc DNS trên tài khoản thật, chưa deploy staging/production**.
+Manage Cloudflare connections/accounts on your device. OAuth tokens stay in the OS credential vault; the local companion calls Cloudflare directly. No vendor-hosted backend, D1, Google login or shared credential database is required.
 
-## Có gì trong code
+```text
+Local MCP host ──stdio──► companion on your device ──HTTPS──► Cloudflare
+                                   │
+                      OS vault + local operation journal
+                                   │
+                     authenticated loopback browser UI
+```
 
-- Google OIDC login (issuer/audience/nonce/verified email), cookie phiên HttpOnly.
-- Authorization server riêng cho MCP: consent trong browser, Authorization Code + S256 PKCE, opaque bearer token lưu hash, resource/audience và expiry kiểm tra mỗi request. Google ID token không phải MCP token.
-- Nhiều Cloudflare connection/account, identity confirmation, alias, lab/production, reconnect đúng subject, revoke độc lập, credential AES-256-GCM gắn connection ID + key version.
-- Workspace invitation theo Google email đã xác minh, role và explicit per-account read/DNS grants. Role không mở quyền credential của người khác. Invitation trong ứng dụng; không tự gửi email.
-- MCP: `whoami`, `list_connections`, `list_accounts`, `list_zones`, `list_dns_records`, `list_workers`, `list_d1_databases`, `list_tunnels`, `preview_dns_change`, `apply_operation`, `get_operation_status`.
-- DNS create/update A/AAAA/CNAME/TXT/MX: preview bất biến, TTL approval 10 phút, đúng actor, production target confirmation, kiểm tra quyền/dữ liệu lại, claim nguyên tử, lock target xuyên connection, đọc lại upstream. Replay chỉ reconcile, không gửi lại write.
-- Sáu màn hình quản trị và audit đã loại credential. API chỉ trả trường inventory được allowlist; không cache dữ liệu/quyền. Pagination 50, tối đa 4 request upstream đồng thời mỗi connection; 429 trả lỗi có kiểm soát để caller chờ rồi retry read.
+**Requires a host that supports local stdio MCP**, such as the documented Codex host. ChatGPT web's remote HTTPS MCP registration does not establish support for a local process. Embedded-only execution remains unverified; see [host capability evidence](docs/HOST-CAPABILITIES.md). This is an implemented local companion, not a claim that ChatGPT web can reach localhost.
 
-## Chạy local
+## Install as a client plugin
 
-Yêu cầu Node 22+, npm. Từ root repo:
+A self-contained **ChatGPT desktop/local-thread** package is available through the repository marketplace. It needs Node 22.12+ but no application build or dependency installation by the user:
+
+```sh
+codex plugin marketplace add OrgGem/cam-clfl-plugin --ref marketplace
+```
+
+Restart ChatGPT desktop, choose the **OrgGem · Cloudflare Local** marketplace source and install the plugin. Ask it to open the Cloudflare connection manager; the UI opens locally without returning its login ticket to the model. [Installation, prerequisites, ZIPs and public Directory requirements](docs/MARKETPLACE.md).
+
+This is a Git-backed marketplace distribution, not an approved public OpenAI Directory listing. Local MCP public submissions currently require an approved/allowlisted partner organization. This client package cannot run as a pure client plugin in ChatGPT web. The earlier tunnel/cloud setup is an optional separate architecture, not required for this package.
+
+## Develop or run from source
+
+Node 22.12+ and npm. On Linux, a running/unlocked desktop Secret Service is required; plaintext and in-memory credential fallbacks are disabled. macOS uses Keychain; Windows uses the OS credential backend through `@napi-rs/keyring`. Platform-specific live vault behavior still needs testing on the user's device.
 
 ```sh
 npm ci
-npm run db:local
 npm run build
-npm run dev
+npm start
 ```
 
-Điền cấu hình OAuth trong `wrangler.jsonc`; tạo `.dev.vars` theo [hướng dẫn cấu hình](docs/OPERATIONS.md). Không đưa secret vào Git. Google callback local: `http://localhost:8787/auth/google/callback`; Cloudflare callback: `http://localhost:8787/auth/cloudflare/callback` (nhà cung cấp có thể yêu cầu URL HTTPS staging).
+Open the **private launch URL printed in the terminal**. It contains a one-time fragment ticket; the UI removes the fragment and exchanges it for an HttpOnly local session. Do not share that URL. The listener binds only `127.0.0.1:3210`.
+
+1. Create a Cloudflare OAuth client with token authentication `none`, Authorization Code and S256 PKCE. Register exact redirect URI `http://127.0.0.1:3210/oauth/callback` (verify the provider accepts this loopback redirect for your client).
+2. Enter its public client ID and approved scope IDs in Connections. Include `openid offline_access` plus permissions for account discovery and the resources you intend to use. No client secret is requested or supported. Select scope IDs from Cloudflare's actual catalog rather than guessing.
+3. Add connection, authorize in Cloudflare, inspect the returned identity/accounts and Confirm. Add another connection for another identity. A connection may expose multiple accounts.
+4. Set account aliases and lab/production. Use Resources for direct reads and DNS previews; Changes for approval, execution and local history.
+
+Private/public OAuth client _visibility_ is distinct from public-client token authentication. A private-visibility client only accepts members of its owning Cloudflare account. Public visibility/domain verification is an account-owner decision, not an automatic app action.
+
+## Connect ChatGPT in a browser
+
+Use OpenAI Secure MCP Tunnel to forward requests to the companion on your device, subject to account/workspace access. Follow [the ChatGPT web setup](docs/CHATGPT-WEB.md). The repository does not create a tunnel or install a plugin into your account automatically. Cloudflare tokens stay local; tool results still reach ChatGPT.
+
+## Connect a local MCP host
+
+Keep the UI and MCP processes under the same OS user and data directory. Use an absolute checkout path:
+
+```sh
+codex mcp add gem-cloudflare-local -- node /ABSOLUTE/REPO/dist/node/apps/local/src/cli.js mcp
+```
+
+For normal plugin installation use the self-contained marketplace package above. The source-tree launcher still supports a development checkout; the distributed launcher loads the bundled runtime inside its own plugin directory and forces OS-vault custody. A signed desktop installer and ChatGPT web client-only execution are not provided. Do not configure `npm run mcp` as the transport command: npm's normal banner can corrupt stdio; launch `node` directly.
+
+Tools: `open_connection_manager`, `whoami`, `list_connections`, `list_accounts`, `list_zones`, `list_dns_records`, `list_workers`, `list_d1_databases`, `list_tunnels`, `preview_dns_change`, `apply_operation`, `get_operation_status`. There is no tool for uploading credentials or approving operations. Select connection/account explicitly on each resource call.
+
+## Verify
 
 ```sh
 npm run check
 npx playwright install --with-deps chromium
 npm run test:e2e
+npm run format:check
+npm run package:plugin
+npm run smoke:package
 ```
 
-E2E dùng D1 fixture tách riêng `.wrangler/e2e`, không gọi tài khoản Cloudflare. `npm run types` tái sinh binding types từ Wrangler. `npm run format:check` kiểm tra định dạng.
+Checks include schema/credential boundaries, mock OAuth discovery for two identities/three accounts, explicit routing, refresh/revoke, browser state/CSRF checks, MCP tools, crash/timeout-safe DNS journal, actual compiled stdio handshake and loopback binary/assets/session smoke. Browser E2E uses an injected fixture vault and fake Cloudflare; production CLI always constructs the OS vault and fixed Cloudflare transport.
 
-## Kiến trúc
+**Live OAuth, real OS-vault integration on each platform and real DNS propagation have not been accepted yet.** No real Cloudflare resource has been changed in this implementation session. See [acceptance checklist](docs/ACCEPTANCE.md).
 
-```mermaid
-flowchart LR
-  Browser[Admin React UI] --> Control[Control Worker / auth + API]
-  ChatGPT --> Gateway[MCP Gateway Worker /mcp]
-  ChatGPT --> Control
-  Control --> Google[Google OIDC]
-  Control --> OAuth[Cloudflare OAuth]
-  Control --> DB[(D1)]
-  Gateway --> DB
-  Gateway --> CF[Cloudflare resource API]
-```
+## Optional cloud custody
 
-`apps/control` chứa UI, OIDC/OAuth, sharing, approvals và audit. `apps/gateway` chứa MCP transport/tools; `packages/core` chứa policy, credential lifecycle, API adapter và operation engine. Local chạy chung một Worker để dùng một origin và dễ kiểm thử. Có entrypoint/config riêng `wrangler.gateway.jsonc` để deploy hai service: route chính xác `/mcp` tới gateway; các đường dẫn còn lại tới control cùng domain. Hai service dùng cùng D1, origin và credential keyring; không gọi vòng qua public endpoint của nhau.
+When explicitly accepted by the owner, set `GEM_CREDENTIAL_STORE=encrypted-file` and supply a separate 256-bit `GEM_VAULT_KEY` runtime secret. Credentials then reside encrypted on the cloud host rather than in a device OS vault. See [cloud deployment requirements](docs/OPERATIONS.md#explicit-cloud-deployment). This does not create an OpenAI tunnel API key or solve cloud browser/OAuth access automatically.
 
-## Đóng gói và phát hành
+## Data and recovery
 
-[Plugin package](plugin/plugin.json) và [MCP config](plugin/mcp.json) theo Agent Plugins 1.0.0; thay URL `.invalid` trước khi cài. Plugin skill hướng dẫn chọn target và xử lý approval/uncertainty. ChatGPT cần đăng ký custom MCP, nhập endpoint và OAuth client đã cấu hình; technical connector ID chỉ có sau khi đăng ký thật. Repo không giả lập ID này.
+Metadata, saved DNS diffs and operation journal live in `~/.gem-cloudflare/state.json`; token values live separately in the OS vault. Override directory with `GEM_DATA_DIR`, and port with `GEM_PORT` (also register its exact OAuth callback). No telemetry, hosted relay or updater is included.
 
-- [Triển khai, onboarding, rotation, backup/recovery](docs/OPERATIONS.md)
-- [Ma trận nghiệm thu và việc cần kiểm chứng thật](docs/ACCEPTANCE.md)
-- [Giới hạn và quyết định bảo mật](docs/SECURITY.md)
+[Security, backups, reconnect and crash recovery](docs/OPERATIONS.md). [Token custody and trust boundaries](docs/SECURITY.md).
 
-CI chạy typecheck, unit/integration/security, build, schema validation, browser E2E, format và npm audit. Không tự deploy hoặc thay đổi Cloudflare account khi push.
-
-## Ngoài phạm vi
-
-Chưa có arbitrary SQL/JavaScript, billing, IAM, bulk delete, Workers deploy/rollback, Tunnel mutation hoặc batch write. Chưa tuyên bố vừa gói Free: cần đo request, D1 reads/writes và CPU trên staging. Bước kiểm chứng tích hợp giai đoạn 0 vẫn là cổng phát hành bắt buộc; mock/local test không thay thế hai user, hai danh tính Cloudflare và ba account thật.
+The old Workers/D1 server manager is archived under `legacy/server-manager` and branch `archive/server-manager-v0.1`. It is excluded from active builds/tests and is not the local application's installation path. No automatic credential migration from that backend is performed.
