@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { build } from "esbuild";
 import { zipSync } from "fflate";
 import {
@@ -151,6 +152,19 @@ await writeFile(
   "dist/gem-cloudflare-plugin.zip",
   zipSync(pluginFiles, { level: 6 }),
 );
+let sums = "";
+for (const name of [
+  "gem-cloudflare-marketplace.zip",
+  "gem-cloudflare-plugin.zip",
+])
+  sums +=
+    createHash("sha256")
+      .update(await readFile("dist/" + name))
+      .digest("hex") +
+    "  " +
+    name +
+    "\n";
+await writeFile("dist/SHA256SUMS.txt", sums);
 console.log(
   "Built self-contained client plugin and marketplace ZIPs for " +
     supported.join(", ") +

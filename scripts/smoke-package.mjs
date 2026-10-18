@@ -72,6 +72,39 @@ try {
     headers: { Origin: origin, Authorization: "Bearer " + ticket },
   });
   if (!auth.ok) throw Error("Standalone session failed");
+  if (process.platform === "linux") {
+    const bin = join(root, "test-bin");
+    await mkdir(bin);
+    await writeFile(join(bin, "xdg-open"), "#!/bin/sh\nexit 0\n", {
+      mode: 0o755,
+    });
+    const operatorClient = new Client({
+      name: "package-operator-smoke",
+      version: "1",
+    });
+    try {
+      await operatorClient.connect(
+        new StdioClientTransport({
+          command: process.execPath,
+          args: [join(root, "plugin/scripts/start.mjs")],
+          cwd: root,
+          env: { ...env, GEM_PORT: "3213", PATH: bin + ":" + process.env.PATH },
+        }),
+      );
+      const action = await operatorClient.callTool({
+        name: "open_connection_manager",
+        arguments: {},
+      });
+      if (
+        action.isError ||
+        JSON.stringify(action).includes("#session=") ||
+        !JSON.stringify(action).includes("opened")
+      )
+        throw Error("Packaged browser action failed");
+    } finally {
+      await operatorClient.close();
+    }
+  }
   console.log(
     "Isolated marketplace ZIP: stdio, forced local custody, UI and session checks passed without source checkout or dependency installation.",
   );

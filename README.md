@@ -12,7 +12,19 @@ Local MCP host ──stdio──► companion on your device ──HTTPS──�
 
 **Requires a host that supports local stdio MCP**, such as the documented Codex host. ChatGPT web's remote HTTPS MCP registration does not establish support for a local process. Embedded-only execution remains unverified; see [host capability evidence](docs/HOST-CAPABILITIES.md). This is an implemented local companion, not a claim that ChatGPT web can reach localhost.
 
-## Install and open
+## Install as a client plugin
+
+A self-contained **ChatGPT desktop/local-thread** package is available through the repository marketplace. It needs Node 22.12+ but no application build or dependency installation by the user:
+
+```sh
+codex plugin marketplace add OrgGem/cam-clfl-plugin --ref marketplace
+```
+
+Restart ChatGPT desktop, choose the **OrgGem · Cloudflare Local** marketplace source and install the plugin. Ask it to open the Cloudflare connection manager; the UI opens locally without returning its login ticket to the model. [Installation, prerequisites, ZIPs and public Directory requirements](docs/MARKETPLACE.md).
+
+This is a Git-backed marketplace distribution, not an approved public OpenAI Directory listing. Local MCP public submissions currently require an approved/allowlisted partner organization. This client package cannot run as a pure client plugin in ChatGPT web. The earlier tunnel/cloud setup is an optional separate architecture, not required for this package.
+
+## Develop or run from source
 
 Node 22.12+ and npm. On Linux, a running/unlocked desktop Secret Service is required; plaintext and in-memory credential fallbacks are disabled. macOS uses Keychain; Windows uses the OS credential backend through `@napi-rs/keyring`. Platform-specific live vault behavior still needs testing on the user's device.
 
@@ -43,9 +55,9 @@ Keep the UI and MCP processes under the same OS user and data directory. Use an 
 codex mcp add gem-cloudflare-local -- node /ABSOLUTE/REPO/dist/node/apps/local/src/cli.js mcp
 ```
 
-Alternatively install `plugin/` as a **local-source** plugin in a host that supports stdio. The launcher resolves the built runtime from this checkout, so keep the checkout and its installed dependencies in place. It is not yet a standalone desktop installer or universal ChatGPT web package. Do not configure `npm run mcp` as the transport command: npm's normal banner can corrupt stdio; launch `node` directly.
+For normal plugin installation use the self-contained marketplace package above. The source-tree launcher still supports a development checkout; the distributed launcher loads the bundled runtime inside its own plugin directory and forces OS-vault custody. A signed desktop installer and ChatGPT web client-only execution are not provided. Do not configure `npm run mcp` as the transport command: npm's normal banner can corrupt stdio; launch `node` directly.
 
-Tools: `whoami`, `list_connections`, `list_accounts`, `list_zones`, `list_dns_records`, `list_workers`, `list_d1_databases`, `list_tunnels`, `preview_dns_change`, `apply_operation`, `get_operation_status`. There is no tool for uploading credentials or approving operations. Select connection/account explicitly on each resource call.
+Tools: `open_connection_manager`, `whoami`, `list_connections`, `list_accounts`, `list_zones`, `list_dns_records`, `list_workers`, `list_d1_databases`, `list_tunnels`, `preview_dns_change`, `apply_operation`, `get_operation_status`. There is no tool for uploading credentials or approving operations. Select connection/account explicitly on each resource call.
 
 ## Verify
 
@@ -54,6 +66,8 @@ npm run check
 npx playwright install --with-deps chromium
 npm run test:e2e
 npm run format:check
+npm run package:plugin
+npm run smoke:package
 ```
 
 Checks include schema/credential boundaries, mock OAuth discovery for two identities/three accounts, explicit routing, refresh/revoke, browser state/CSRF checks, MCP tools, crash/timeout-safe DNS journal, actual compiled stdio handshake and loopback binary/assets/session smoke. Browser E2E uses an injected fixture vault and fake Cloudflare; production CLI always constructs the OS vault and fixed Cloudflare transport.

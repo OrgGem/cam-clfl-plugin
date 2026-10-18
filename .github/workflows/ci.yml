@@ -18,6 +18,15 @@ jobs:
       - run: npm audit --omit=dev --audit-level=high
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - run: npm run package:plugin
+      - run: npm run smoke:package
+      - uses: actions/upload-artifact@v4
+        with:
+          name: client-marketplace-package
+          path: |
+            dist/gem-cloudflare-marketplace.zip
+            dist/gem-cloudflare-plugin.zip
+            dist/SHA256SUMS.txt
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
