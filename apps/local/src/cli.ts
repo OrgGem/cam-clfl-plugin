@@ -63,12 +63,16 @@ async function main() {
     origin = "http://127.0.0.1:" + port,
     ticket = opaque(),
     app = localApp(manager, origin, ticket);
-  const assets = fileURLToPath(
-    new URL(
-      import.meta.url.endsWith(".ts") ? "../../../dist/ui/" : "../../../../ui/",
-      import.meta.url,
-    ),
-  );
+  const assets =
+    process.env.GEM_UI_DIR ??
+    fileURLToPath(
+      new URL(
+        import.meta.url.endsWith(".ts")
+          ? "../../../dist/ui/"
+          : "../../../../ui/",
+        import.meta.url,
+      ),
+    );
   app.use("/*", serveStatic({ root: assets }));
   app.get("/", serveStatic({ root: assets, path: "index.html" }));
   const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () =>

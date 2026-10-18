@@ -1,6 +1,6 @@
 {
   "name": "gem-cloudflare-manager",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,7 +16,9 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "smoke:stdio": "node scripts/smoke-stdio.mjs",
-    "smoke:local": "node scripts/smoke-local.mjs"
+    "smoke:local": "node scripts/smoke-local.mjs",
+    "package:plugin": "npm run build && node scripts/package-plugin.mjs",
+    "smoke:package": "node scripts/smoke-package.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",
@@ -35,6 +37,8 @@
     "@vitejs/plugin-react": "latest",
     "ajv": "^8.20.0",
     "ajv-formats": "^3.0.1",
+    "esbuild": "^0.28.2",
+    "fflate": "^0.8.3",
     "prettier": "^3.9.10",
     "tsx": "^4.23.15",
     "typescript": "latest",
