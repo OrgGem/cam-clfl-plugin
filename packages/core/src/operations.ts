@@ -327,7 +327,7 @@ export async function apply(
     try {
       await cf.call(
         `/zones/${row.zone_id}/dns_records${row.record_id ? "/" + row.record_id : ""}`,
-        row.record_id ? "PUT" : "POST",
+        row.record_id ? "PATCH" : "POST",
         p,
       );
     } catch (e) {

@@ -24,11 +24,20 @@ vi.mock("../packages/core/src/cloudflare", async (original) => {
             success: true,
             result: { account: { id: "a".repeat(32) } },
           });
-        if (init?.method === "POST" || init?.method === "PUT") {
+        if (
+          init?.method === "POST" ||
+          init?.method === "PUT" ||
+          init?.method === "PATCH"
+        ) {
           backend.writes++;
           const data = JSON.parse(String(init.body));
           backend.records = [
-            { ...data, id: "d".repeat(32), modified_on: "2026-10-18" },
+            {
+              ...(init?.method === "PATCH" ? backend.records[0] : {}),
+              ...data,
+              id: "d".repeat(32),
+              modified_on: "2026-10-18",
+            },
           ];
           if (backend.timeout) throw Error("timeout after commit");
           return Response.json({ success: true, result: backend.records[0] });
@@ -631,4 +640,35 @@ it("delegates account audit only with explicit credential access and current adm
   ]);
   await env.DB.prepare("DELETE FROM access_grants").run();
   expect(await (await request()).json()).toEqual([]);
+});
+it("patches only approved DNS fields while preserving unpreviewed comments and tags", async () => {
+  backend.records = [
+    {
+      ...input.record,
+      id: "d".repeat(32),
+      modified_on: "2026-10-18",
+      comment: "Keep this comment",
+      tags: ["team:lab"],
+    },
+  ];
+  const p = await preview(
+    env,
+    "alice",
+    {
+      ...input,
+      record_id: "d".repeat(32),
+      record: { ...input.record, content: "192.0.2.2" },
+    },
+    "r",
+  );
+  await approve(env, "alice", p.operation_id, "approve", "", "r");
+  expect((await apply(env, "alice", p.operation_id, "r")).status).toBe(
+    "succeeded",
+  );
+  expect(backend.records[0]).toMatchObject({
+    content: "192.0.2.2",
+    comment: "Keep this comment",
+    tags: ["team:lab"],
+  });
+  expect(backend.writes).toBe(1);
 });
