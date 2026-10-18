@@ -1,0 +1,17 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "gem-cloudflare-manager",
+  "version": "0.3.0",
+  "description": "Manage Cloudflare on your device through local MCP; credentials stay in the OS vault.",
+  "author": {
+    "name": "OrgGem"
+  },
+  "repository": "https://github.com/OrgGem/cam-clfl-plugin",
+  "homepage": "https://github.com/OrgGem/cam-clfl-plugin",
+  "keywords": ["cloudflare", "local", "dns", "desktop"],
+  "extensions": {
+    "com.openai": {
+      "requires_local_executor": true
+    }
+  }
+}
