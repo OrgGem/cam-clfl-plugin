@@ -1,0 +1,18 @@
+PRAGMA foreign_keys = ON;
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, google_sub TEXT UNIQUE NOT NULL, email TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS workspaces (id TEXT PRIMARY KEY, name TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS memberships (workspace_id TEXT NOT NULL REFERENCES workspaces(id), user_id TEXT NOT NULL REFERENCES users(id), role TEXT NOT NULL CHECK(role IN ('owner','admin','operator','viewer')), PRIMARY KEY(workspace_id,user_id));
+CREATE TABLE IF NOT EXISTS sessions (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_sessions (state_hash TEXT PRIMARY KEY, provider TEXT NOT NULL, user_id TEXT, verifier TEXT NOT NULL, nonce TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS oauth_codes (code_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), client_id TEXT NOT NULL, redirect_uri TEXT NOT NULL, challenge TEXT NOT NULL, resource TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS access_tokens (token_hash TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), client_id TEXT NOT NULL, audience TEXT NOT NULL, scope TEXT NOT NULL, expires_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS cloudflare_connections (id TEXT PRIMARY KEY, owner_id TEXT NOT NULL REFERENCES users(id), identity TEXT NOT NULL, status TEXT NOT NULL, credential TEXT NOT NULL, key_version TEXT NOT NULL, expires_at INTEGER NOT NULL, refresh_lock TEXT, refresh_until INTEGER);
+CREATE TABLE IF NOT EXISTS connection_accounts (connection_id TEXT NOT NULL REFERENCES cloudflare_connections(id), account_id TEXT NOT NULL, name TEXT NOT NULL, alias TEXT NOT NULL, environment TEXT NOT NULL DEFAULT 'lab' CHECK(environment IN ('lab','production')), scopes TEXT NOT NULL, PRIMARY KEY(connection_id,account_id), UNIQUE(connection_id,alias));
+CREATE TABLE IF NOT EXISTS access_grants (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL, account_id TEXT NOT NULL, permission TEXT NOT NULL CHECK(permission IN ('read','dns:write')), FOREIGN KEY(connection_id,account_id) REFERENCES connection_accounts(connection_id,account_id), UNIQUE(user_id,connection_id,account_id,permission));
+CREATE TABLE IF NOT EXISTS invitations (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id), email TEXT NOT NULL, role TEXT NOT NULL, expires_at INTEGER NOT NULL, accepted_by TEXT REFERENCES users(id));
+CREATE TABLE IF NOT EXISTS operations (id TEXT PRIMARY KEY, user_id TEXT NOT NULL REFERENCES users(id), connection_id TEXT NOT NULL, account_id TEXT NOT NULL, zone_id TEXT NOT NULL, record_id TEXT, payload TEXT NOT NULL, before_json TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('pending','approved','rejected','applying','succeeded','conflict','uncertain','failed')), expires_at INTEGER NOT NULL, result TEXT, created_at INTEGER NOT NULL, request_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS approvals (operation_id TEXT PRIMARY KEY REFERENCES operations(id), user_id TEXT NOT NULL REFERENCES users(id), approved_at INTEGER NOT NULL, consumed_at INTEGER);
+CREATE TABLE IF NOT EXISTS audit_events (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, action TEXT NOT NULL, connection_id TEXT, account_id TEXT, operation_id TEXT, result TEXT NOT NULL, request_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS audit_user_time ON audit_events(user_id,created_at);
+CREATE INDEX IF NOT EXISTS operations_user ON operations(user_id,created_at);
+CREATE INDEX IF NOT EXISTS grants_user ON access_grants(user_id,connection_id,account_id);
