@@ -1,0 +1,6 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "gem-cloudflare-manager",
+  "version": "0.1.0",
+  "description": "Manage explicitly shared Cloudflare accounts and review DNS changes before execution."
+}
