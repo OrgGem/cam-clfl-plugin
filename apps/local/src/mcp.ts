@@ -12,7 +12,10 @@ import {
   operationInput,
 } from "../../../packages/local/src/operations.js";
 import { Fault, zoneSchema } from "../../../packages/local/src/security.js";
-export function createMcp(manager: Manager) {
+export function createMcp(
+  manager: Manager,
+  local?: { openManager: () => Promise<unknown> },
+) {
   const server = new McpServer(
     { name: "Gem Cloudflare Local", version: "0.2.0" },
     {
@@ -49,6 +52,21 @@ export function createMcp(manager: Manager) {
       };
     }
   };
+  if (local)
+    server.registerTool(
+      "open_connection_manager",
+      {
+        inputSchema: z.object({}).strict(),
+        description:
+          "Open the private account/connection manager in the user device browser. Use for adding accounts or approving DNS. No launch ticket or credential is returned to the model.",
+        annotations: {
+          readOnlyHint: false,
+          destructiveHint: false,
+          openWorldHint: false,
+        },
+      },
+      () => wrap(() => local.openManager()),
+    );
   server.registerTool(
     "whoami",
     {

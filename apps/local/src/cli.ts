@@ -12,6 +12,8 @@ import { SystemVault } from "../../../packages/local/src/vault.js";
 import { Manager } from "../../../packages/local/src/manager.js";
 import { Fault, opaque } from "../../../packages/local/src/security.js";
 import { localApp } from "./http.js";
+import { operatorKey, openManager } from "./operator.js";
+import { hash } from "../../../packages/local/src/security.js";
 import { createMcp } from "./mcp.js";
 async function main() {
   const mode = process.argv[2] ?? "ui",
@@ -28,7 +30,20 @@ async function main() {
   const store = new LocalStore(directory),
     manager = new Manager(store, vault);
   if (mode === "mcp") {
-    await createMcp(manager).connect(new StdioServerTransport());
+    await createMcp(manager, {
+      openManager: () =>
+        openManager({
+          directory,
+          credentialStorage: manager.vault.storage,
+          entry: fileURLToPath(import.meta.url),
+          port: z.coerce
+            .number()
+            .int()
+            .min(1024)
+            .max(65535)
+            .parse(process.env.GEM_PORT ?? 3210),
+        }),
+    }).connect(new StdioServerTransport());
     return;
   }
   if (mode === "recover-lock") {
@@ -62,7 +77,10 @@ async function main() {
       .parse(process.env.GEM_PORT ?? 3210),
     origin = "http://127.0.0.1:" + port,
     ticket = opaque(),
-    app = localApp(manager, origin, ticket);
+    app = localApp(manager, origin, ticket, {
+      key: await operatorKey(directory),
+      dataId: hash(directory),
+    });
   const assets =
     process.env.GEM_UI_DIR ??
     fileURLToPath(
@@ -76,12 +94,14 @@ async function main() {
   app.use("/*", serveStatic({ root: assets }));
   app.get("/", serveStatic({ root: assets, path: "index.html" }));
   const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () =>
-    console.error(
-      "Open this private local launch URL in your browser:\n" +
-        origin +
-        "/#session=" +
-        ticket,
-    ),
+    process.send
+      ? process.send({ type: "gem-ui-ready" })
+      : console.error(
+          "Open this private local launch URL in your browser:\n" +
+            origin +
+            "/#session=" +
+            ticket,
+        ),
   );
   server.on("error", () => {
     console.error("Unable to bind local port; no credential was exposed.");

@@ -1,7 +1,7 @@
 import { unzipSync } from "fflate";
 import { readFile, mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join, resolve, dirname } from "node:path";
+import { join, resolve, dirname, relative, isAbsolute } from "node:path";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
 import { setTimeout as pause } from "node:timers/promises";
@@ -17,7 +17,10 @@ try {
   );
   for (const [name, bytes] of Object.entries(files)) {
     const path = resolve(root, name);
-    if (!path.startsWith(root + "/"))
+    if (
+      relative(root, path).startsWith("..") ||
+      isAbsolute(relative(root, path))
+    )
       throw Error("Archive path escapes package");
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, bytes);

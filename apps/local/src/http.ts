@@ -18,6 +18,7 @@ export function localApp(
   manager: Manager,
   origin: string,
   launchTicket = opaque(),
+  operator?: { key: string; dataId: string },
 ) {
   const app = new Hono<{ Variables: { requestId: string } }>(),
     operations = new Operations(manager),
@@ -93,7 +94,28 @@ export function localApp(
     });
     return c.json({ ok: true });
   });
-  app.get("/health", (c) => c.json({ ok: true, mode: "local-only" }));
+  app.post("/operator/launch", (c) => {
+    const supplied =
+      c.req.header("Authorization")?.replace(/^Bearer /, "") ?? "";
+    if (
+      !operator ||
+      !timingSafeEqual(
+        Buffer.from(hash(supplied)),
+        Buffer.from(hash(operator.key)),
+      )
+    )
+      throw new Fault(403, "operator_access_required");
+    ticket = opaque();
+    return c.json({ ticket });
+  });
+  app.get("/health", (c) =>
+    c.json({
+      ok: true,
+      mode: "local-only",
+      app: "gem-cloudflare-manager",
+      data_id: operator?.dataId,
+    }),
+  );
   app.use("/api/*", async (c, next) => {
     const session = getCookie(c, "gem-local-session");
     if (!session || (sessions.get(hash(session)) ?? 0) <= now())
