@@ -1,15 +1,1 @@
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "strict": true,
-    "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM"],
-    "types": ["@cloudflare/workers-types"],
-    "skipLibCheck": true,
-    "noEmit": true,
-    "allowImportingTsExtensions": true
-  },
-  "include": ["apps", "packages", "tests", "worker-configuration.d.ts"]
-}
+{"compilerOptions":{"target":"ES2022","module":"ESNext","moduleResolution":"Bundler","strict":true,"jsx":"react-jsx","lib":["ES2022","DOM"],"types":["node","vite/client"],"skipLibCheck":true,"noEmit":true,"allowImportingTsExtensions":true},"include":["apps","packages","tests","playwright.config.ts","vitest.config.ts"]}
