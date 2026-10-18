@@ -1,10 +1,151 @@
-import {mkdtemp,rm} from 'node:fs/promises';
-import {join} from 'node:path';
-import {tmpdir} from 'node:os';
-import {Fault,now} from '../packages/local/src/security.js';
-import {Vault,Token} from '../packages/local/src/vault.js';
-import {LocalStore} from '../packages/local/src/store.js';
-import {Manager} from '../packages/local/src/manager.js';
-import {Cloudflare} from '../packages/local/src/cloudflare.js';
-export class TestVault implements Vault{tokens=new Map<string,Token>();async get(id:string){const token=this.tokens.get(id);if(!token)throw new Fault(503,'credential_vault_unavailable_or_locked');return token;}async set(id:string,t:Token){this.tokens.set(id,t);}async delete(id:string){this.tokens.delete(id);}}
-export async function fixture(){const dir=await mkdtemp(join(tmpdir(),'gem-local-'));const vault=new TestVault(),store=new LocalStore(dir);const backend={calls:[] as {url:string;method:string;body?:string}[],tokens:0,refreshes:0,writes:0,timeout:false,rateLimit:false,refreshFails:false,records:new Map<string,Record<string,unknown>[]>()};const network:typeof fetch=async(input,init)=>{const url=new URL(String(input)),method=init?.method??'GET';backend.calls.push({url:url.toString(),method,body:init?.body?.toString()});if(url.pathname.endsWith('/token')){const b=new URLSearchParams(String(init?.body));if(b.get('grant_type')==='refresh_token'){backend.refreshes++;if(backend.refreshFails)return new Response('private',{status:401});return Response.json({access_token:'fake-access-1',refresh_token:'fake-refresh-1',expires_in:3600,scope:'openid offline_access'});}backend.tokens++;return Response.json({access_token:'fake-access-'+backend.tokens,refresh_token:'fake-refresh-'+backend.tokens,expires_in:3600,scope:'openid offline_access'});}if(url.pathname.endsWith('/userinfo')){const access=new Headers(init?.headers).get('Authorization');return Response.json({sub:'identity-'+access?.at(-1),email:'person'+access?.at(-1)+'@example.com'});}if(url.pathname.endsWith('/revoke'))return new Response('');if(backend.rateLimit)return new Response('private',{status:429});const access=new Headers(init?.headers).get('Authorization'),second=access?.endsWith('-2');if(url.pathname.endsWith('/accounts'))return Response.json({success:true,result:(second?['b','c']:['a']).map(c=>({id:c.repeat(32),name:'Same name'}))});const match=url.pathname.match(/\/zones\/([a-f0-9]{32})/),zone=match?.[1]??'d'.repeat(32);if(match&&url.pathname.endsWith(zone))return Response.json({success:true,result:{account:{id:(zone.startsWith('e')?'b':'a').repeat(32)}}});if(url.pathname.includes('/dns_records')){const rows=backend.records.get(zone)??[];if(method==='POST'||method==='PATCH'){backend.writes++;const body=JSON.parse(String(init?.body));const record={...(method==='PATCH'?rows[0]:{}),...body,id:'f'.repeat(32),modified_on:String(backend.writes)};backend.records.set(zone,[record]);if(backend.timeout)throw Error('timeout after commit');return Response.json({success:true,result:record});}return Response.json({success:true,result:url.pathname.endsWith('/dns_records')?rows:rows.find(r=>r.id===url.pathname.split('/').at(-1))});}return Response.json({success:true,result:[{id:'same-resource',name:'Same name',status:'healthy',access_token:'must-not-leak'}]});};const manager=new Manager(store,vault,new Cloudflare(network));await manager.configure({client_id:'public-client',scopes:'openid offline_access'});return {dir,store,vault,backend,manager,cleanup:()=>rm(dir,{recursive:true,force:true}),async connect(){const c=await manager.connect({client_id:'public-client',scopes:'openid offline_access'},'http://127.0.0.1:3210/oauth/callback','code','verifier');await manager.confirm(c.id);return c;}};}
+import { mkdtemp, rm } from "node:fs/promises";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { Fault, now } from "../packages/local/src/security.js";
+import { Vault, Token } from "../packages/local/src/vault.js";
+import { LocalStore } from "../packages/local/src/store.js";
+import { Manager } from "../packages/local/src/manager.js";
+import { Cloudflare } from "../packages/local/src/cloudflare.js";
+export class TestVault implements Vault {
+  tokens = new Map<string, Token>();
+  async get(id: string) {
+    const token = this.tokens.get(id);
+    if (!token) throw new Fault(503, "credential_vault_unavailable_or_locked");
+    return token;
+  }
+  async set(id: string, t: Token) {
+    this.tokens.set(id, t);
+  }
+  async delete(id: string) {
+    this.tokens.delete(id);
+  }
+}
+export async function fixture() {
+  const dir = await mkdtemp(join(tmpdir(), "gem-local-"));
+  const vault = new TestVault(),
+    store = new LocalStore(dir);
+  const backend = {
+    calls: [] as { url: string; method: string; body?: string }[],
+    tokens: 0,
+    refreshes: 0,
+    writes: 0,
+    timeout: false,
+    rateLimit: false,
+    refreshFails: false,
+    records: new Map<string, Record<string, unknown>[]>(),
+  };
+  const network: typeof fetch = async (input, init) => {
+    const url = new URL(String(input)),
+      method = init?.method ?? "GET";
+    backend.calls.push({
+      url: url.toString(),
+      method,
+      body: init?.body?.toString(),
+    });
+    if (url.pathname.endsWith("/token")) {
+      const b = new URLSearchParams(String(init?.body));
+      if (b.get("grant_type") === "refresh_token") {
+        backend.refreshes++;
+        if (backend.refreshFails)
+          return new Response("private", { status: 401 });
+        return Response.json({
+          access_token: "fake-access-1",
+          refresh_token: "fake-refresh-1",
+          expires_in: 3600,
+          scope: "openid offline_access",
+        });
+      }
+      backend.tokens++;
+      return Response.json({
+        access_token: "fake-access-" + backend.tokens,
+        refresh_token: "fake-refresh-" + backend.tokens,
+        expires_in: 3600,
+        scope: "openid offline_access",
+      });
+    }
+    if (url.pathname.endsWith("/userinfo")) {
+      const access = new Headers(init?.headers).get("Authorization");
+      return Response.json({
+        sub: "identity-" + access?.at(-1),
+        email: "person" + access?.at(-1) + "@example.com",
+      });
+    }
+    if (url.pathname.endsWith("/revoke")) return new Response("");
+    if (backend.rateLimit) return new Response("private", { status: 429 });
+    const access = new Headers(init?.headers).get("Authorization"),
+      second = access?.endsWith("-2");
+    if (url.pathname.endsWith("/accounts"))
+      return Response.json({
+        success: true,
+        result: (second ? ["b", "c"] : ["a"]).map((c) => ({
+          id: c.repeat(32),
+          name: "Same name",
+        })),
+      });
+    const match = url.pathname.match(/\/zones\/([a-f0-9]{32})/),
+      zone = match?.[1] ?? "d".repeat(32);
+    if (match && url.pathname.endsWith(zone))
+      return Response.json({
+        success: true,
+        result: {
+          account: { id: (zone.startsWith("e") ? "b" : "a").repeat(32) },
+        },
+      });
+    if (url.pathname.includes("/dns_records")) {
+      const rows = backend.records.get(zone) ?? [];
+      if (method === "POST" || method === "PATCH") {
+        backend.writes++;
+        const body = JSON.parse(String(init?.body));
+        const record = {
+          ...(method === "PATCH" ? rows[0] : {}),
+          ...body,
+          id: "f".repeat(32),
+          modified_on: String(backend.writes),
+        };
+        backend.records.set(zone, [record]);
+        if (backend.timeout) throw Error("timeout after commit");
+        return Response.json({ success: true, result: record });
+      }
+      return Response.json({
+        success: true,
+        result: url.pathname.endsWith("/dns_records")
+          ? rows
+          : rows.find((r) => r.id === url.pathname.split("/").at(-1)),
+      });
+    }
+    return Response.json({
+      success: true,
+      result: [
+        {
+          id: "same-resource",
+          name: "Same name",
+          status: "healthy",
+          access_token: "must-not-leak",
+        },
+      ],
+    });
+  };
+  const manager = new Manager(store, vault, new Cloudflare(network));
+  await manager.configure({
+    client_id: "public-client",
+    scopes: "openid offline_access",
+  });
+  return {
+    dir,
+    store,
+    vault,
+    backend,
+    manager,
+    cleanup: () => rm(dir, { recursive: true, force: true }),
+    async connect() {
+      const c = await manager.connect(
+        { client_id: "public-client", scopes: "openid offline_access" },
+        "http://127.0.0.1:3210/oauth/callback",
+        "code",
+        "verifier",
+      );
+      await manager.confirm(c.id);
+      return c;
+    },
+  };
+}

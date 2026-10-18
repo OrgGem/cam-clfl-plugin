@@ -1,16 +1,168 @@
-import {z} from 'zod';
-import {Fault,boundedJson,now} from './security.js';
-import {Token} from './vault.js';
-const tokens=z.object({access_token:z.string(),refresh_token:z.string(),scope:z.string().optional(),expires_in:z.number().positive()});
-export class Cloudflare{
- constructor(private network:typeof fetch=fetch){}
- private async send(url:string,init:RequestInit,write=false){try{return await this.network(url,{...init,redirect:'error',signal:AbortSignal.timeout(15000)});}catch{throw new Fault(502,write?'write_outcome_uncertain':'upstream_unavailable');}}
- async exchange(client_id:string,redirect_uri:string,code:string,verifier:string):Promise<Token>{return this.token(new URLSearchParams({grant_type:'authorization_code',client_id,redirect_uri,code,code_verifier:verifier}));}
- async refresh(client_id:string,refresh_token:string):Promise<Token>{return this.token(new URLSearchParams({grant_type:'refresh_token',client_id,refresh_token}));}
- private async token(body:URLSearchParams){const r=await this.send('https://dash.cloudflare.com/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body});if(!r.ok)throw new Fault(401,'cloudflare_oauth_failed_reconnect');const t=tokens.parse(await boundedJson(r,65536));return {access_token:t.access_token,refresh_token:t.refresh_token,scope:t.scope??'',expires_at:now()+t.expires_in};}
- async identity(token:Token){const r=await this.send('https://dash.cloudflare.com/oauth2/userinfo',{headers:{Authorization:'Bearer '+token.access_token}});if(!r.ok)throw new Fault(401,'cloudflare_identity_failed');return z.object({sub:z.string(),email:z.string().optional()}).parse(await boundedJson(r,65536));}
- async revoke(client_id:string,token:Token){const r=await this.send('https://dash.cloudflare.com/oauth2/revoke',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id,token:token.refresh_token,token_type_hint:'refresh_token'})});if(!r.ok)throw new Fault(502,'upstream_revocation_unconfirmed');}
- async api(token:Token,path:string,method='GET',body?:unknown):Promise<{result:unknown;result_info?:unknown}>{if(!/^\/(accounts|zones)(\/|\?|$)/.test(path)||path.includes('..')||path.includes('#'))throw new Fault(400,'invalid_api_path');const write=method!=='GET';const r=await this.send('https://api.cloudflare.com/client/v4'+path,{method,headers:{Authorization:'Bearer '+token.access_token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)},write);if(r.status===429)throw new Fault(429,'cloudflare_rate_limited_retry_read_later');if(r.status===401||r.status===403)throw new Fault(403,'cloudflare_permission_denied');if(!r.ok)throw new Fault(502,write?'write_outcome_uncertain':'cloudflare_request_failed');try{const data=z.object({success:z.literal(true),result:z.unknown(),result_info:z.object({page:z.number().optional(),total_pages:z.number().optional(),count:z.number().optional()}).optional()}).parse(await boundedJson(r));return data;}catch{throw new Fault(502,write?'write_outcome_uncertain':'cloudflare_invalid_response');}}
- async accounts(token:Token){const result:{id:string;name:string}[]=[];for(let page=1;page<=100;page++){const r=await this.api(token,`/accounts?per_page=50&page=${page}`);const found=z.array(z.object({id:z.string().regex(/^[a-f0-9]{32}$/),name:z.string()})).parse(r.result);result.push(...found);if(found.length<50)return result;}throw new Fault(400,'account_discovery_limit_exceeded');}
- async zone(token:Token,account:string,zone:string){const r=await this.api(token,'/zones/'+zone);if(z.object({account:z.object({id:z.string()})}).parse(r.result).account.id!==account)throw new Fault(403,'zone_account_mismatch');}
+import { z } from "zod";
+import { Fault, boundedJson, now } from "./security.js";
+import { Token } from "./vault.js";
+const tokens = z.object({
+  access_token: z.string(),
+  refresh_token: z.string(),
+  scope: z.string().optional(),
+  expires_in: z.number().positive(),
+});
+export class Cloudflare {
+  constructor(private network: typeof fetch = fetch) {}
+  private async send(url: string, init: RequestInit, write = false) {
+    try {
+      return await this.network(url, {
+        ...init,
+        redirect: "error",
+        signal: AbortSignal.timeout(15000),
+      });
+    } catch {
+      throw new Fault(
+        502,
+        write ? "write_outcome_uncertain" : "upstream_unavailable",
+      );
+    }
+  }
+  async exchange(
+    client_id: string,
+    redirect_uri: string,
+    code: string,
+    verifier: string,
+  ): Promise<Token> {
+    return this.token(
+      new URLSearchParams({
+        grant_type: "authorization_code",
+        client_id,
+        redirect_uri,
+        code,
+        code_verifier: verifier,
+      }),
+    );
+  }
+  async refresh(client_id: string, refresh_token: string): Promise<Token> {
+    return this.token(
+      new URLSearchParams({
+        grant_type: "refresh_token",
+        client_id,
+        refresh_token,
+      }),
+    );
+  }
+  private async token(body: URLSearchParams) {
+    const r = await this.send("https://dash.cloudflare.com/oauth2/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!r.ok) throw new Fault(401, "cloudflare_oauth_failed_reconnect");
+    const t = tokens.parse(await boundedJson(r, 65536));
+    return {
+      access_token: t.access_token,
+      refresh_token: t.refresh_token,
+      scope: t.scope ?? "",
+      expires_at: now() + t.expires_in,
+    };
+  }
+  async identity(token: Token) {
+    const r = await this.send("https://dash.cloudflare.com/oauth2/userinfo", {
+      headers: { Authorization: "Bearer " + token.access_token },
+    });
+    if (!r.ok) throw new Fault(401, "cloudflare_identity_failed");
+    return z
+      .object({ sub: z.string(), email: z.string().optional() })
+      .parse(await boundedJson(r, 65536));
+  }
+  async revoke(client_id: string, token: Token) {
+    const r = await this.send("https://dash.cloudflare.com/oauth2/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id,
+        token: token.refresh_token,
+        token_type_hint: "refresh_token",
+      }),
+    });
+    if (!r.ok) throw new Fault(502, "upstream_revocation_unconfirmed");
+  }
+  async api(
+    token: Token,
+    path: string,
+    method = "GET",
+    body?: unknown,
+  ): Promise<{ result: unknown; result_info?: unknown }> {
+    if (
+      !/^\/(accounts|zones)(\/|\?|$)/.test(path) ||
+      path.includes("..") ||
+      path.includes("#")
+    )
+      throw new Fault(400, "invalid_api_path");
+    const write = method !== "GET";
+    const r = await this.send(
+      "https://api.cloudflare.com/client/v4" + path,
+      {
+        method,
+        headers: {
+          Authorization: "Bearer " + token.access_token,
+          "Content-Type": "application/json",
+        },
+        body: body === undefined ? undefined : JSON.stringify(body),
+      },
+      write,
+    );
+    if (r.status === 429)
+      throw new Fault(429, "cloudflare_rate_limited_retry_read_later");
+    if (r.status === 401 || r.status === 403)
+      throw new Fault(403, "cloudflare_permission_denied");
+    if (!r.ok)
+      throw new Fault(
+        502,
+        write ? "write_outcome_uncertain" : "cloudflare_request_failed",
+      );
+    try {
+      const data = z
+        .object({
+          success: z.literal(true),
+          result: z.unknown(),
+          result_info: z
+            .object({
+              page: z.number().optional(),
+              total_pages: z.number().optional(),
+              count: z.number().optional(),
+            })
+            .optional(),
+        })
+        .parse(await boundedJson(r));
+      return data;
+    } catch {
+      throw new Fault(
+        502,
+        write ? "write_outcome_uncertain" : "cloudflare_invalid_response",
+      );
+    }
+  }
+  async accounts(token: Token) {
+    const result: { id: string; name: string }[] = [];
+    for (let page = 1; page <= 100; page++) {
+      const r = await this.api(token, `/accounts?per_page=50&page=${page}`);
+      const found = z
+        .array(
+          z.object({
+            id: z.string().regex(/^[a-f0-9]{32}$/),
+            name: z.string(),
+          }),
+        )
+        .parse(r.result);
+      result.push(...found);
+      if (found.length < 50) return result;
+    }
+    throw new Fault(400, "account_discovery_limit_exceeded");
+  }
+  async zone(token: Token, account: string, zone: string) {
+    const r = await this.api(token, "/zones/" + zone);
+    if (
+      z.object({ account: z.object({ id: z.string() }) }).parse(r.result)
+        .account.id !== account
+    )
+      throw new Fault(403, "zone_account_mismatch");
+  }
 }
