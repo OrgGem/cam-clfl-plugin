@@ -5,7 +5,8 @@ import {AppEnv,Fault,targetSchema,zoneSchema} from '../../../packages/core/src/s
 import {readInventory,readNames,readSchema,listConnections,listAccounts} from '../../../packages/core/src/inventory';
 import {bearerUser} from '../../control/src/auth';
 import {preview,previewSchema,apply,operationSchema,operationStatus} from '../../../packages/core/src/operations';
-export async function mcp(request:Request,env:AppEnv,requestId:string) {
+export type GatewayEnv = Pick<AppEnv,'DB'|'APP_ORIGIN'|'MCP_CLIENT_ID'|'CF_CLIENT_ID'|'CF_CLIENT_SECRET'|'CREDENTIAL_KEYS'|'KEY_VERSION'>;
+export async function mcp(request:Request,env:GatewayEnv,requestId:string) {
  const user=await bearerUser(env,request.headers.get('Authorization')??undefined);
  if(request.headers.has('Origin') && request.headers.get('Origin')!==env.APP_ORIGIN)throw new Fault(403,'invalid_origin');
  const server=new McpServer({name:'Gem Cloudflare Manager',version:'0.1.0'});

@@ -1,12 +1,12 @@
 import {z} from 'zod';
-import {AppEnv,Target,authorize,audit,targetSchema,zoneSchema} from './security';
+import {CoreEnv,Target,authorize,audit,targetSchema,zoneSchema} from './security';
 import {client} from './cloudflare';
-export async function listConnections(env:AppEnv,user:string) {return (await env.DB.prepare(`SELECT DISTINCT c.id,c.identity,c.status,c.owner_id=? AS owned FROM cloudflare_connections c LEFT JOIN access_grants g ON g.connection_id=c.id WHERE c.owner_id=? OR g.user_id=?`).bind(user,user,user).all()).results;}
-export async function listAccounts(env:AppEnv,user:string) {return (await env.DB.prepare(`SELECT a.connection_id,a.account_id,a.name,a.alias,a.environment,a.scopes,a.available,c.status FROM connection_accounts a JOIN cloudflare_connections c ON c.id=a.connection_id WHERE c.owner_id=? OR EXISTS (SELECT 1 FROM access_grants g WHERE g.user_id=? AND g.connection_id=a.connection_id AND g.account_id=a.account_id)`).bind(user,user).all()).results;}
+export async function listConnections(env:CoreEnv,user:string) {return (await env.DB.prepare(`SELECT DISTINCT c.id,c.identity,c.status,c.owner_id=? AS owned FROM cloudflare_connections c LEFT JOIN access_grants g ON g.connection_id=c.id WHERE c.owner_id=? OR g.user_id=?`).bind(user,user,user).all()).results;}
+export async function listAccounts(env:CoreEnv,user:string) {return (await env.DB.prepare(`SELECT a.connection_id,a.account_id,a.name,a.alias,a.environment,a.scopes,a.available,c.status FROM connection_accounts a JOIN cloudflare_connections c ON c.id=a.connection_id WHERE c.owner_id=? OR EXISTS (SELECT 1 FROM access_grants g WHERE g.user_id=? AND g.connection_id=a.connection_id AND g.account_id=a.account_id)`).bind(user,user).all()).results;}
 export const readSchema=targetSchema.extend({page:z.number().int().min(1).max(1000).default(1)});
 export const readNames=['list_zones','list_dns_records','list_workers','list_d1_databases','list_tunnels'] as const;
 export type ReadName=typeof readNames[number];
-export async function readInventory(env:AppEnv,user:string,name:ReadName,input:unknown,request:string) {
+export async function readInventory(env:CoreEnv,user:string,name:ReadName,input:unknown,request:string) {
  const v=name==='list_dns_records'?zoneSchema.parse(input):readSchema.parse(input);const target:Target=v;
  const access=await authorize(env,user,target);const cf=await client(env,target.connection_id);
  if('zone_id' in v)await cf.zone(target,z.string().parse(v.zone_id));

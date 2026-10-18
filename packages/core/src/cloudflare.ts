@@ -1,10 +1,10 @@
 import {z} from 'zod';
-import {AppEnv,Fault,now,open,seal,encryptionKey,Target} from './security';
+import {CoreEnv,Fault,now,open,seal,encryptionKey,Target} from './security';
 export const credentials = z.object({access_token:z.string(),refresh_token:z.string(),scope:z.string().default('')});
 export type Credentials = z.infer<typeof credentials>;
 const envelope=z.object({success:z.boolean(),result:z.unknown(),result_info:z.object({page:z.number().optional(),total_pages:z.number().optional(),count:z.number().optional()}).optional()});
 export class Cloudflare {
- constructor(private token:string,private upstream:typeof fetch=fetch,private gate?:{env:AppEnv;connection:string}){}
+ constructor(private token:string,private upstream:typeof fetch=fetch,private gate?:{env:CoreEnv;connection:string}){}
  async call(path:string,method='GET',body?:unknown):Promise<{result:unknown;result_info?:unknown}> {
   if(!this.gate)return this.request(path,method,body);
   const {env,connection}=this.gate,id=crypto.randomUUID();
@@ -27,7 +27,7 @@ export class Cloudflare {
  }
  async zone(target:Target,zone:string) {const r=await this.call(`/zones/${zone}`);const v=z.object({account:z.object({id:z.string()})}).parse(r.result);if(v.account.id!==target.account_id)throw new Fault(403,'zone_account_mismatch');}
 }
-export async function client(env:AppEnv,id:string):Promise<Cloudflare> {
+export async function client(env:CoreEnv,id:string):Promise<Cloudflare> {
  const row=await env.DB.prepare('SELECT * FROM cloudflare_connections WHERE id=? AND status=\'active\'').bind(id).first<{credential:string;key_version:string;expires_at:number}>();
  if(!row)throw new Fault(403,'connection_unavailable');
  let token=credentials.parse(await open(row.credential,encryptionKey(env,row.key_version),id));

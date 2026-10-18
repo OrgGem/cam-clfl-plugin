@@ -1,0 +1,13 @@
+import {Hono} from 'hono';
+import {bodyLimit} from 'hono/body-limit';
+import {z} from 'zod';
+import {Fault} from '../../../packages/core/src/security';
+import {mcp,GatewayEnv} from './mcp';
+const app=new Hono<{Bindings:GatewayEnv;Variables:{requestId:string}}>();
+app.use('*',bodyLimit({maxSize:65536,onError:c=>c.json({error:'body_too_large'},413)}));
+app.use('*',async(c,next)=>{c.set('requestId',crypto.randomUUID());c.header('X-Request-ID',c.get('requestId'));c.header('Cache-Control','no-store');c.header('X-Content-Type-Options','nosniff');await next();});
+app.onError((e,c)=>{const status=e instanceof Fault?e.status:e instanceof z.ZodError?400:500;if(status===401)c.header('WWW-Authenticate',`Bearer resource_metadata="${c.env.APP_ORIGIN}/.well-known/oauth-protected-resource/mcp"`);return c.json({error:e instanceof Fault?e.code:status===400?'invalid_input':'internal_error',request_id:c.get('requestId')},status as 400);});
+app.all('/mcp',c=>mcp(c.req.raw,c.env,c.get('requestId')));
+app.get('/.well-known/oauth-protected-resource/mcp',c=>c.json({resource:c.env.APP_ORIGIN+'/mcp',authorization_servers:[c.env.APP_ORIGIN],scopes_supported:['mcp'],bearer_methods_supported:['header']}));
+app.get('/health',c=>c.json({ok:true,service:'mcp-gateway'}));
+export default app;
