@@ -4,6 +4,7 @@ import {z} from 'zod';
 import {AppEnv,Fault,targetSchema,zoneSchema} from '../../../packages/core/src/security';
 import {readInventory,readNames,readSchema,listConnections,listAccounts} from '../../../packages/core/src/inventory';
 import {bearerUser} from '../../control/src/auth';
+import {preview,previewSchema,apply,operationSchema,operationStatus} from '../../../packages/core/src/operations';
 export async function mcp(request:Request,env:AppEnv,requestId:string) {
  const user=await bearerUser(env,request.headers.get('Authorization')??undefined);
  if(request.headers.has('Origin') && request.headers.get('Origin')!==env.APP_ORIGIN)throw new Fault(403,'invalid_origin');
@@ -13,5 +14,8 @@ export async function mcp(request:Request,env:AppEnv,requestId:string) {
  server.registerTool('list_connections',{description:'List explicitly owned or shared connections.',inputSchema:z.object({}).strict(),annotations:{readOnlyHint:true}},wrap(()=>listConnections(env,user)));
  server.registerTool('list_accounts',{description:'Resolve explicit connection/account target and alias before resource calls. Never guess.',inputSchema:z.object({}).strict(),annotations:{readOnlyHint:true}},wrap(()=>listAccounts(env,user)));
  for(const name of readNames)server.registerTool(name,{description:'Read one explicit target. Results carry connection/account/alias/request ID. Page size 50; retry 429 later.',inputSchema:name==='list_dns_records'?zoneSchema:readSchema,annotations:{readOnlyHint:true}},args=>wrap(()=>readInventory(env,user,name,args,requestId))());
+ server.registerTool('preview_dns_change',{description:'Preview a DNS create/update for an explicit target. Requires idempotency_key UUID. Approval is only possible in the app UI.',inputSchema:previewSchema,annotations:{readOnlyHint:false,destructiveHint:false}},args=>wrap(()=>preview(env,user,args,requestId))());
+ server.registerTool('apply_operation',{description:'Apply an operation already approved in the app. Only accepts the operation ID; replay reconciles without repeating writes.',inputSchema:operationSchema,annotations:{readOnlyHint:false,destructiveHint:true,idempotentHint:true}},args=>wrap(()=>apply(env,user,args.operation_id,requestId))());
+ server.registerTool('get_operation_status',{description:'Read operation diff, target and verified result.',inputSchema:operationSchema,annotations:{readOnlyHint:true}},args=>wrap(()=>operationStatus(env,user,args.operation_id))());
  const transport=new WebStandardStreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});await server.connect(transport);return transport.handleRequest(request);
 }

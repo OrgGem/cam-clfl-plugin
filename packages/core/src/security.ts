@@ -25,9 +25,14 @@ export function recordShape(v: unknown) { const r=z.object({id:z.string().option
 export type AppEnv = { [K in keyof Env]: Env[K] extends string ? string : Env[K] } & {GOOGLE_CLIENT_SECRET:string; CF_CLIENT_SECRET:string; CREDENTIAL_KEYS:string};
 export function encryptionKey(env: AppEnv, version: string) { const keys=z.record(z.string(),z.string()).parse(JSON.parse(env.CREDENTIAL_KEYS)); if(!keys[version])throw new Fault(503,'encryption_key_unavailable');return keys[version]; }
 export async function audit(env: AppEnv, user: string, action: string, request: string, target?: Target, operation?: string, result='ok') {
- await env.DB.prepare('INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user,action,target?.connection_id??null,target?.account_id??null,operation??null,result,request,now()).run();
+ await env.DB.prepare('INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user,action,target?.connection_id??null,target?.account_id??null,operation??null,result,request,now()).run();
 }
 export async function authorize(env: AppEnv, user: string, target: Target, permission='read') {
  const row=await env.DB.prepare(`SELECT a.*, c.owner_id, c.status FROM connection_accounts a JOIN cloudflare_connections c ON c.id=a.connection_id WHERE a.connection_id=? AND a.account_id=? AND c.status='active' AND (c.owner_id=? OR EXISTS (SELECT 1 FROM access_grants g WHERE g.user_id=? AND g.connection_id=a.connection_id AND g.account_id=a.account_id AND g.permission=?))`).bind(target.connection_id,target.account_id,user,user,permission).first<{owner_id:string;alias:string;environment:string;scopes:string}>();
- if(!row)throw new Fault(403,'target_not_authorized');return row;
+ if(!row)throw new Fault(403,'target_not_authorized');
+ if(row.owner_id!==user){
+  const membership=await env.DB.prepare(`SELECT 1 FROM memberships actor JOIN memberships owner ON owner.workspace_id=actor.workspace_id WHERE actor.user_id=? AND owner.user_id=? AND (?='read' OR actor.role IN ('owner','admin','operator'))`).bind(user,row.owner_id,permission).first();
+  if(!membership)throw new Fault(403,'workspace_role_not_authorized');
+ }
+ return row;
 }

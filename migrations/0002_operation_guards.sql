@@ -1,0 +1,2 @@
+CREATE TABLE IF NOT EXISTS operation_keys (user_id TEXT NOT NULL REFERENCES users(id), idempotency_key TEXT NOT NULL, operation_id TEXT UNIQUE NOT NULL REFERENCES operations(id), request_hash TEXT NOT NULL, PRIMARY KEY(user_id,idempotency_key));
+CREATE TABLE IF NOT EXISTS dns_locks (connection_id TEXT NOT NULL, zone_id TEXT NOT NULL, record_key TEXT NOT NULL, operation_id TEXT UNIQUE NOT NULL REFERENCES operations(id), PRIMARY KEY(connection_id,zone_id,record_key));
