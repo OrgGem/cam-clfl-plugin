@@ -1,2 +1,2 @@
-49623f85e43f58bf81153e1b941f54e67fb073beb26661757cb3ef6462de6e4b  gem-cloudflare-marketplace.zip
-ebb1d46250d545d61260ab65992e55d5a1c37980399b3987dc117938c023698a  gem-cloudflare-plugin.zip
+e4272f6f04fb1169babcc09edd67142d8b7892e818e1cae7752807d4e33c56c8  gem-cloudflare-marketplace.zip
+01fbd6fd30a3d0fec78129d3b902bcf763c47dec558e143c89cd88e47e4b4a54  gem-cloudflare-plugin.zip
