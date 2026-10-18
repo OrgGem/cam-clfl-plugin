@@ -16,6 +16,7 @@ const child = spawn(
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
+const exited = once(child, "exit");
 child.stderr.on("data", (chunk) => (diagnostics += String(chunk)));
 child.stdout.on("data", (chunk) => (output += String(chunk)));
 try {
@@ -44,8 +45,7 @@ try {
   if (!state.ok || output) throw Error("Local UI smoke failed.");
   console.log("Compiled loopback UI/assets/session checks passed.");
 } finally {
-  const ended = once(child, "exit");
   child.kill();
-  await ended;
+  await exited;
   await rm(directory, { recursive: true, force: true });
 }
