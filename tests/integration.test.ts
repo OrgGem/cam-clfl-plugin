@@ -72,6 +72,7 @@ beforeAll(async () => {
     "0001_foundation.sql",
     "0002_operation_guards.sql",
     "0003_connection_lifecycle.sql",
+    "0004_approval_policy.sql",
   ]) {
     const sql = await readFile(
       new URL("../migrations/" + file, import.meta.url),
@@ -582,4 +583,15 @@ it("binds Cloudflare callback to browser state and consumes it once", async () =
   } finally {
     vi.unstubAllGlobals();
   }
+});
+it("invalidates an approval when account production policy changes", async () => {
+  const p = await preview(env, "alice", input, "r");
+  await approve(env, "alice", p.operation_id, "approve", "", "r");
+  await env.DB.prepare(
+    "UPDATE connection_accounts SET environment='production'",
+  ).run();
+  await expect(apply(env, "alice", p.operation_id, "r")).rejects.toThrow(
+    "valid_approval_required",
+  );
+  expect(backend.writes).toBe(0);
 });

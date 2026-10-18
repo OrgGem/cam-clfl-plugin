@@ -184,8 +184,8 @@ export async function approve(
   else
     await env.DB.batch([
       env.DB.prepare(
-        "INSERT INTO approvals (operation_id,user_id,approved_at) SELECT id,?,? FROM operations WHERE id=? AND status='pending' AND expires_at>?",
-      ).bind(user, now(), id, now()),
+        "INSERT INTO approvals (operation_id,user_id,approved_at,environment) SELECT id,?,?,? FROM operations WHERE id=? AND status='pending' AND expires_at>?",
+      ).bind(user, now(), access.environment, id, now()),
       env.DB.prepare(
         "UPDATE operations SET status='approved' WHERE id=? AND status='pending' AND EXISTS (SELECT 1 FROM approvals WHERE operation_id=? AND user_id=?)",
       ).bind(id, id, user),
@@ -276,6 +276,14 @@ export async function apply(
     return verify(env, row, cf, request);
   if (row.status !== "approved" || row.expires_at <= now())
     throw new Fault(409, "valid_approval_required");
+  const policy = await authorize(env, user, row, "dns:write");
+  const approval = await env.DB.prepare(
+    "SELECT environment FROM approvals WHERE operation_id=? AND user_id=? AND consumed_at IS NULL",
+  )
+    .bind(id, user)
+    .first<{ environment: string }>();
+  if (!approval || approval.environment !== policy.environment)
+    throw new Fault(409, "valid_approval_required");
   const p = desired(row),
     key = p.type + ":" + p.name;
   await env.DB.prepare("INSERT OR IGNORE INTO dns_locks VALUES (?,?,?,?)")
@@ -289,7 +297,7 @@ export async function apply(
   if (lock?.operation_id !== id)
     throw new Fault(409, "dns_target_operation_in_progress");
   const claim = await env.DB.prepare(
-    `UPDATE operations SET status='applying' WHERE id=? AND status='approved' AND expires_at>? AND EXISTS (SELECT 1 FROM approvals WHERE operation_id=? AND user_id=? AND consumed_at IS NULL) RETURNING id`,
+    `UPDATE operations SET status='applying' WHERE id=? AND status='approved' AND expires_at>? AND EXISTS (SELECT 1 FROM approvals p JOIN connection_accounts a ON a.connection_id=operations.connection_id AND a.account_id=operations.account_id WHERE p.operation_id=? AND p.user_id=? AND p.consumed_at IS NULL AND p.environment=a.environment) RETURNING id`,
   )
     .bind(id, now(), id, user)
     .first();
