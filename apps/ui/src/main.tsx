@@ -7,6 +7,7 @@ import type {
 import type { State } from "../../../packages/local/src/store.js";
 import "./style.css";
 type PublicState = {
+  credential_storage?: string;
   config: State["config"];
   connections: Connection[];
   operations: Operation[];
@@ -130,8 +131,16 @@ function App() {
           ))}
         </nav>
         <footer>
-          <strong>LOCAL DEVICE</strong>
-          <p>Cloudflare credentials stay in your OS vault. No hosted proxy.</p>
+          <strong>
+            {state.credential_storage === "cloud-encrypted-file"
+              ? "CLOUD COMPANION"
+              : "LOCAL DEVICE"}
+          </strong>
+          <p>
+            {state.credential_storage === "cloud-encrypted-file"
+              ? "Credentials are encrypted on this cloud host; the master key is supplied by the runtime."
+              : "Cloudflare credentials stay in your OS vault. No hosted proxy."}
+          </p>
         </footer>
       </aside>
       <main>
@@ -145,7 +154,9 @@ function App() {
           </button>
         </header>
         <div className="privacy">
-          Device → Cloudflare · No Google login · No shared credential server
+          {state.credential_storage === "cloud-encrypted-file"
+            ? "Cloud companion → Cloudflare · Encrypted credential vault"
+            : "Device → Cloudflare · No Google login · No shared credential server"}
         </div>
         {error && (
           <p className="alert" role="alert">

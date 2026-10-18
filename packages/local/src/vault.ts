@@ -11,11 +11,13 @@ export const tokenSchema = z
   .strict();
 export type Token = z.infer<typeof tokenSchema>;
 export interface Vault {
+  readonly storage?: string;
   get(id: string): Promise<Token>;
   set(id: string, token: Token): Promise<void>;
   delete(id: string): Promise<void>;
 }
 export class SystemVault implements Vault {
+  readonly storage = "os-vault";
   constructor(private namespace: string) {}
   private entry(id: string) {
     return new Entry("orggem.gem-cloudflare." + hash(this.namespace), id, {

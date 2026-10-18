@@ -60,6 +60,10 @@ Checks include schema/credential boundaries, mock OAuth discovery for two identi
 
 **Live OAuth, real OS-vault integration on each platform and real DNS propagation have not been accepted yet.** No real Cloudflare resource has been changed in this implementation session. See [acceptance checklist](docs/ACCEPTANCE.md).
 
+## Optional cloud custody
+
+When explicitly accepted by the owner, set `GEM_CREDENTIAL_STORE=encrypted-file` and supply a separate 256-bit `GEM_VAULT_KEY` runtime secret. Credentials then reside encrypted on the cloud host rather than in a device OS vault. See [cloud deployment requirements](docs/OPERATIONS.md#explicit-cloud-deployment). This does not create an OpenAI tunnel API key or solve cloud browser/OAuth access automatically.
+
 ## Data and recovery
 
 Metadata, saved DNS diffs and operation journal live in `~/.gem-cloudflare/state.json`; token values live separately in the OS vault. Override directory with `GEM_DATA_DIR`, and port with `GEM_PORT` (also register its exact OAuth callback). No telemetry, hosted relay or updater is included.

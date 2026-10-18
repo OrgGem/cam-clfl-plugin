@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { readFile, unlink } from "node:fs/promises";
 import { z } from "zod";
 import { LocalStore } from "../../../packages/local/src/store.js";
+import { CloudVault } from "../../../packages/local/src/cloud-vault.js";
 import { SystemVault } from "../../../packages/local/src/vault.js";
 import { Manager } from "../../../packages/local/src/manager.js";
 import { Fault, opaque } from "../../../packages/local/src/security.js";
@@ -17,8 +18,15 @@ async function main() {
     directory = resolve(
       process.env.GEM_DATA_DIR ?? join(homedir(), ".gem-cloudflare"),
     );
+  const credentialStore = z
+    .enum(["os", "encrypted-file"])
+    .parse(process.env.GEM_CREDENTIAL_STORE ?? "os");
+  const vault =
+    credentialStore === "encrypted-file"
+      ? new CloudVault(directory, () => process.env.GEM_VAULT_KEY)
+      : new SystemVault(directory);
   const store = new LocalStore(directory),
-    manager = new Manager(store, new SystemVault(directory));
+    manager = new Manager(store, vault);
   if (mode === "mcp") {
     await createMcp(manager).connect(new StdioServerTransport());
     return;

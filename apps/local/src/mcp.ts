@@ -59,8 +59,11 @@ export function createMcp(manager: Manager) {
     },
     () =>
       wrap(async (request) => ({
-        mode: "local-device",
-        credential_storage: "os-vault",
+        mode:
+          manager.vault.storage === "cloud-encrypted-file"
+            ? "cloud-companion"
+            : "local-device",
+        credential_storage: manager.vault.storage ?? "custom-vault",
         request_id: request,
       })),
   );

@@ -62,6 +62,7 @@ export class Manager {
   async publicState() {
     const s = await this.store.read();
     return {
+      credential_storage: this.vault.storage ?? "custom-vault",
       config: s.config,
       connections: s.connections,
       operations: s.operations,

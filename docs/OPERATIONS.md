@@ -49,3 +49,13 @@ Stop companion and MCP before backing up the local directory. The state file con
 Restoring an old journal can resurrect approved or completed operations. Before reopening, revoke/reconnect credentials and retain/mark all unexecuted restored operations for investigation; compare upstream state before any new preview. Do not restore a journal and blindly apply old approvals. Preserve uncertain write entries until reconciled. No automatic retention scheduler is included; future compaction must preserve idempotency keys and unresolved operations.
 
 For support, share sanitized action/request IDs, never the launch URL, browser cookie, OAuth callback URL, token, vault contents or complete DNS TXT payloads.
+
+## Explicit cloud deployment
+
+If the owner explicitly accepts cloud credential custody, the CLI supports `GEM_CREDENTIAL_STORE=encrypted-file`. Set `GEM_DATA_DIR` to a private persistent cloud directory and supply `GEM_VAULT_KEY` as a 32-byte base64/base64url AES key through a runtime secret. The default remains the OS vault; missing/invalid cloud keys fail closed. UI/MCP metadata report cloud custody rather than claiming device-only storage.
+
+This mode encrypts each credential with AES-256-GCM, a fresh IV and authenticated binding to its connection ID and vault directory. Metadata/journal remain separate. Keep the key outside the credential directory and outside Git. A private mode-0600 key file outside the vault can be used when explicitly operating a single-user cloud workspace; it is not a managed HSM, and a compromise/snapshot of the entire host may expose both key and ciphertext. Back up the master key separately: losing it requires reconnecting the Cloudflare identities. No automatic key rotation is implemented.
+
+OpenAI's tunnel runtime API key is distinct from this application-generated encryption key. It must be issued by OpenAI for a principal with tunnel Read + Use; random generation cannot create a valid OpenAI credential. Reference it through `env:CONTROL_PLANE_API_KEY`, never embed it in a profile or repository. Session cloud environments are not an uptime or durable-storage guarantee; configure persistent hosting/supervision before relying on continuous access.
+
+The admin UI still binds loopback. A cloud host needs a protected operator access path and an OAuth redirect that actually reaches that host before real connection management is usable. A local readiness check or empty MCP account list does not establish browser access, Cloudflare OAuth or a successful ChatGPT tool call.
