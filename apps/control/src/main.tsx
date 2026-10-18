@@ -1,26 +1,705 @@
-import React,{useState,useEffect} from 'react';
-import {createRoot} from 'react-dom/client';
-import './style.css';
-type Row=Record<string,string|number|boolean|null>;
-type Op={operation_id:string;connection_id:string;account_id:string;zone_id:string;alias:string;environment:string;status:string;before:unknown;after:unknown;result:unknown;request_id:string;expires_at:number};
-async function api<T>(path:string,method='GET',body?:unknown):Promise<T>{const r=await fetch('/api'+path,{method,headers:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});if(!r.ok){const data=await r.json<{error?:string}>();throw Error(data.error??'Request failed');}return r.json<T>();}
-const screens=['Overview','Connections','Accounts','Users & Access','Approvals & Operations','Audit'];
-function App(){
- const [view,setView]=useState(new URLSearchParams(location.search).get('view')??'Overview'),[me,setMe]=useState<{user:{id:string;email:string};memberships:Row[]}|null>(null),[connections,setConnections]=useState<Row[]>([]),[accounts,setAccounts]=useState<Row[]>([]),[operations,setOperations]=useState<Row[]>([]),[events,setEvents]=useState<Row[]>([]),[access,setAccess]=useState<{memberships:Row[];grants:Row[];invitations:Row[]}>({memberships:[],grants:[],invitations:[]}),[error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[op,setOp]=useState<Op|null>(null),[confirmation,setConfirmation]=useState('');
- async function reload(){const identity=await api<typeof me>('/me');setMe(identity);const [c,a,o,x,e]=await Promise.all([api<Row[]>('/connections'),api<Row[]>('/accounts'),api<Row[]>('/operations'),api<typeof access>('/access'),api<Row[]>('/audit')]);setConnections(c);setAccounts(a);setOperations(o);setAccess(x);setEvents(e);}
- useEffect(()=>{reload().catch(e=>{if(e.message!=='login_required')setError(e.message);});},[]);
- async function run(fn:()=>Promise<unknown>,refresh=true){setBusy(true);setError('');setNotice('');try{await fn();if(refresh)await reload();setNotice('Saved.');}catch(e){setError(e instanceof Error?e.message:'Request failed');}finally{setBusy(false);}}
- const data=(e:React.FormEvent<HTMLFormElement>)=>{e.preventDefault();return Object.fromEntries(new FormData(e.currentTarget));};
- if(!me)return <main className="login"><span className="brand">GEM / CLOUDFLARE</span><h1>Your accounts.<br/>One clear control room.</h1><p>Connect Cloudflare identities, share specific accounts and review every DNS change before it runs.</p><a className="button" href="/auth/google/start">Continue with Google</a>{error&&<p role="alert">{error}</p>}</main>;
- return <div className="shell"><aside><a className="brand" href="/">GEM <span>Cloudflare Manager</span></a><nav aria-label="Main">{screens.map(s=><button key={s} aria-current={view===s?'page':undefined} onClick={()=>{setView(s);setOp(null);setError('');}}>{s}</button>)}</nav><footer>{me.user.email}<button onClick={()=>run(async()=>{await api('/logout','POST');location.href='/';})}>Sign out</button></footer></aside><main><header><div><small>WORKSPACE CONTROL ROOM</small><h1>{view}</h1></div><button disabled={busy} onClick={()=>run(reload)}>Refresh</button></header>{error&&<div className="alert" role="alert">{error}</div>}{notice&&<div role="status" className="notice">{notice}</div>}
- {view==='Overview'&&<><div className="stats"><article><small>Active connections</small><strong>{connections.filter(c=>c.status==='active').length}</strong></article><article><small>Available accounts</small><strong>{accounts.length}</strong></article><article><small>Pending approvals</small><strong>{operations.filter(o=>o.status==='pending').length}</strong></article></div><section><h2>Recent operations</h2><Table rows={operations.slice(0,8)} columns={['id','account_id','status','created_at']}/></section><section><h2>Connect ChatGPT</h2><p>MCP endpoint: <code>{location.origin}/mcp</code>. Sign in through the OAuth flow. Resource access follows your explicit grants.</p><button disabled={busy} onClick={()=>run(()=>api('/mcp-sessions','DELETE'))}>Revoke all ChatGPT access tokens</button></section></>}
- {view==='Connections'&&<><p>Confirm the linked identity and discovered accounts before enabling a new connection.</p><a className="button" href="/auth/cloudflare/start">Add Cloudflare connection</a><div className="cards">{connections.map(c=><article key={String(c.id)}><h2>{c.identity}</h2><span className="pill">{c.status}</span><code>{c.id}</code>{accounts.filter(a=>a.connection_id===c.id).map(a=><p key={String(a.account_id)}>{a.name}<code>{a.account_id}</code></p>)}{Boolean(c.owned)&&<div className="actions">{c.status==='pending_confirmation'&&<button disabled={busy} onClick={()=>run(()=>api('/connections/'+c.id+'/confirm','POST'))}>Confirm identity & accounts</button>}<a href={"/auth/cloudflare/start?connection_id="+c.id}>Reconnect same identity</a><button disabled={busy} onClick={()=>run(()=>api('/connections/'+c.id+'/revoke','POST'))}>Revoke connection</button></div>}</article>)}</div></>}
- {view==='Accounts'&&<div className="cards">{accounts.map(a=><article key={String(a.connection_id)+a.account_id}><Target a={a}/><form onSubmit={e=>{const b=data(e);run(()=>api('/accounts','PATCH',{connection_id:a.connection_id,account_id:a.account_id,...b}));}}><label>Alias<input required name="alias" defaultValue={String(a.alias)} pattern="[a-zA-Z0-9_-]{1,50}"/></label><label>Environment<select name="environment" defaultValue={String(a.environment)}><option value="lab">Lab</option><option value="production">Production</option></select></label><button disabled={busy}>Save account settings</button></form></article>)}</div>}
- {view==='Users & Access'&&<><section><h2>Invite a workspace member</h2><form className="inline" onSubmit={e=>{const b=data(e);run(()=>api('/invitations','POST',b));}}><label>Workspace<select name="workspace_id">{me.memberships.filter(m=>m.role==='owner').map(m=><option key={String(m.workspace_id)}>{m.workspace_id}</option>)}</select></label><label>Google email<input name="email" type="email" required/></label><label>Role<select name="role"><option>viewer</option><option>operator</option><option>admin</option></select></label><button disabled={busy}>Create invitation</button></form><p className="muted">Invitations appear when the recipient signs in. Workspace roles do not grant access to another member's credentials.</p>{access.invitations.map(i=><p key={String(i.id)}>{i.workspace_id} · {i.role} <button disabled={busy} onClick={()=>run(()=>api('/invitations/'+i.id+'/accept','POST'))}>Accept invitation</button></p>)}<Table rows={access.memberships} columns={['workspace_id','email','user_id','role']}/></section><section><h2>Share one account</h2><form className="inline" onSubmit={e=>{const b=data(e);const a=accounts.find(a=>a.connection_id+'/'+a.account_id===b.target);if(a)run(()=>api('/grants','POST',{connection_id:a.connection_id,account_id:a.account_id,user_id:b.user_id,permission:b.permission}));}}><label>Target<select name="target">{accounts.map(a=><option key={String(a.connection_id)+a.account_id} value={a.connection_id+'/'+a.account_id}>{a.alias} · {a.account_id} · {a.connection_id}</option>)}</select></label><label>Member<select name="user_id">{access.memberships.filter(m=>m.user_id!==me.user.id).map(m=><option key={String(m.workspace_id)+m.user_id} value={String(m.user_id)}>{m.email} ({m.role})</option>)}</select></label><label>Permission<select name="permission"><option value="read">Read inventory</option><option value="dns:write">DNS preview & apply</option></select></label><button disabled={busy}>Grant account access</button></form>{access.grants.map(g=><article key={String(g.id)}><p>{g.user_id} · {g.account_id} · {g.permission}</p><button disabled={busy} onClick={()=>run(()=>api('/grants/'+g.id,'DELETE'))}>Revoke grant</button></article>)}</section></>}
- {view==='Approvals & Operations'&&<><p>Review the exact target and saved payload. Approval expires ten minutes after preview. Execute an approved operation through ChatGPT.</p>{operations.map(o=><button className="operation" key={String(o.id)} onClick={()=>run(async()=>{setOp(await api<Op>('/operations/'+o.id));setConfirmation('');})}><span>{o.account_id}<code>{o.id}</code></span><span className="pill">{o.status}</span></button>)}{op&&<section><Target a={{connection_id:op.connection_id,account_id:op.account_id,alias:op.alias,environment:op.environment,name:op.alias}}/><p>Zone: <code>{op.zone_id}</code></p><div className="diff"><div><h3>Before</h3><pre>{JSON.stringify(op.before,null,2)}</pre></div><div><h3>After</h3><pre>{JSON.stringify(op.after,null,2)}</pre></div></div><p>State: {op.status} · Expires {new Date(op.expires_at*1000).toLocaleString()}</p>{op.environment==='production'&&<label className="alert">Production: type the exact target to approve<code>{op.connection_id}/{op.account_id}/{op.zone_id}</code><input value={confirmation} onChange={e=>setConfirmation(e.target.value)} autoComplete="off"/></label>}{op.status==='pending'&&<div className="actions">{(['approve','reject'] as const).map(decision=><button disabled={busy} key={decision} onClick={()=>run(async()=>setOp(await api<Op>('/operations/'+op.operation_id+'/decision','POST',{decision,confirmation})))}>{decision==='approve'?'Approve this change':'Reject'}</button>)}</div>}<pre>{JSON.stringify(op.result,null,2)}</pre><small>Request {op.request_id}</small></section>}</>}
- {view==='Audit'&&<><form className="inline" onSubmit={e=>{const b=data(e);run(async()=>{const q=new URLSearchParams(Object.entries(b).filter(([,v])=>v).map(([k,v])=>[k,String(v)]));setEvents(await api<Row[]>('/audit?'+q));},false);}}><label>Account ID<input name="account_id"/></label><label>Request ID<input name="request_id"/></label><label>Since (Unix seconds)<input name="from" type="number" min="0"/></label><button disabled={busy}>Filter</button></form><Table rows={events} columns={['created_at','user_id','action','account_id','result','request_id']}/></>}
- </main></div>;
+import React, { useState, useEffect } from "react";
+import { createRoot } from "react-dom/client";
+import "./style.css";
+type Row = Record<string, string | number | boolean | null>;
+type Op = {
+  operation_id: string;
+  connection_id: string;
+  account_id: string;
+  zone_id: string;
+  alias: string;
+  environment: string;
+  status: string;
+  before: unknown;
+  after: unknown;
+  result: unknown;
+  request_id: string;
+  expires_at: number;
+};
+async function api<T>(
+  path: string,
+  method = "GET",
+  body?: unknown,
+): Promise<T> {
+  const r = await fetch("/api" + path, {
+    method,
+    headers: { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!r.ok) {
+    const data = await r.json<{ error?: string }>();
+    throw Error(data.error ?? "Request failed");
+  }
+  return r.json<T>();
 }
-function Target({a}:{a:Row}){return <div className={'target '+(a.environment==='production'?'production':'')}><strong>{a.alias} · {a.name}</strong><span className="pill">{a.environment}</span><code>Account {a.account_id}</code><code>Connection {a.connection_id}</code></div>;}
-function Table({rows,columns}:{rows:Row[];columns:string[]}){return rows.length?<div className="table"><table><thead><tr>{columns.map(c=><th key={c}>{c.replaceAll('_',' ')}</th>)}</tr></thead><tbody>{rows.map((r,i)=><tr key={String(r.id??i)}>{columns.map(c=><td key={c}>{c==='created_at'?new Date(Number(r[c])*1000).toLocaleString():String(r[c]??'—')}</td>)}</tr>)}</tbody></table></div>:<p className="empty">No items to show.</p>;}
-createRoot(document.getElementById('root')!).render(<App/>);
+const screens = [
+  "Overview",
+  "Connections",
+  "Accounts",
+  "Users & Access",
+  "Approvals & Operations",
+  "Audit",
+];
+function App() {
+  const [view, setView] = useState(
+      new URLSearchParams(location.search).get("view") ?? "Overview",
+    ),
+    [me, setMe] = useState<{
+      user: { id: string; email: string };
+      memberships: Row[];
+    } | null>(null),
+    [connections, setConnections] = useState<Row[]>([]),
+    [accounts, setAccounts] = useState<Row[]>([]),
+    [operations, setOperations] = useState<Row[]>([]),
+    [events, setEvents] = useState<Row[]>([]),
+    [access, setAccess] = useState<{
+      memberships: Row[];
+      grants: Row[];
+      invitations: Row[];
+    }>({ memberships: [], grants: [], invitations: [] }),
+    [error, setError] = useState(""),
+    [notice, setNotice] = useState(""),
+    [busy, setBusy] = useState(false),
+    [op, setOp] = useState<Op | null>(null),
+    [confirmation, setConfirmation] = useState("");
+  async function reload() {
+    const identity = await api<typeof me>("/me");
+    setMe(identity);
+    const [c, a, o, x, e] = await Promise.all([
+      api<Row[]>("/connections"),
+      api<Row[]>("/accounts"),
+      api<Row[]>("/operations"),
+      api<typeof access>("/access"),
+      api<Row[]>("/audit"),
+    ]);
+    setConnections(c);
+    setAccounts(a);
+    setOperations(o);
+    setAccess(x);
+    setEvents(e);
+  }
+  useEffect(() => {
+    reload().catch((e) => {
+      if (e.message !== "login_required") setError(e.message);
+    });
+  }, []);
+  async function run(fn: () => Promise<unknown>, refresh = true) {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await fn();
+      if (refresh) await reload();
+      setNotice("Saved.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Request failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+  const data = (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    return Object.fromEntries(new FormData(e.currentTarget));
+  };
+  if (!me)
+    return (
+      <main className="login">
+        <span className="brand">GEM / CLOUDFLARE</span>
+        <h1>
+          Your accounts.
+          <br />
+          One clear control room.
+        </h1>
+        <p>
+          Connect Cloudflare identities, share specific accounts and review
+          every DNS change before it runs.
+        </p>
+        <a className="button" href="/auth/google/start">
+          Continue with Google
+        </a>
+        {error && <p role="alert">{error}</p>}
+      </main>
+    );
+  return (
+    <div className="shell">
+      <aside>
+        <a className="brand" href="/">
+          GEM <span>Cloudflare Manager</span>
+        </a>
+        <nav aria-label="Main">
+          {screens.map((s) => (
+            <button
+              key={s}
+              aria-current={view === s ? "page" : undefined}
+              onClick={() => {
+                setView(s);
+                setOp(null);
+                setError("");
+              }}
+            >
+              {s}
+            </button>
+          ))}
+        </nav>
+        <footer>
+          {me.user.email}
+          <button
+            onClick={() =>
+              run(async () => {
+                await api("/logout", "POST");
+                location.href = "/";
+              })
+            }
+          >
+            Sign out
+          </button>
+        </footer>
+      </aside>
+      <main>
+        <header>
+          <div>
+            <small>WORKSPACE CONTROL ROOM</small>
+            <h1>{view}</h1>
+          </div>
+          <button disabled={busy} onClick={() => run(reload)}>
+            Refresh
+          </button>
+        </header>
+        {error && (
+          <div className="alert" role="alert">
+            {error}
+          </div>
+        )}
+        {notice && (
+          <div role="status" className="notice">
+            {notice}
+          </div>
+        )}
+        {view === "Overview" && (
+          <>
+            <div className="stats">
+              <article>
+                <small>Active connections</small>
+                <strong>
+                  {connections.filter((c) => c.status === "active").length}
+                </strong>
+              </article>
+              <article>
+                <small>Available accounts</small>
+                <strong>{accounts.length}</strong>
+              </article>
+              <article>
+                <small>Pending approvals</small>
+                <strong>
+                  {operations.filter((o) => o.status === "pending").length}
+                </strong>
+              </article>
+            </div>
+            <section>
+              <h2>Recent operations</h2>
+              <Table
+                rows={operations.slice(0, 8)}
+                columns={["id", "account_id", "status", "created_at"]}
+              />
+            </section>
+            <section>
+              <h2>Connect ChatGPT</h2>
+              <p>
+                MCP endpoint: <code>{location.origin}/mcp</code>. Sign in
+                through the OAuth flow. Resource access follows your explicit
+                grants.
+              </p>
+              <button
+                disabled={busy}
+                onClick={() => run(() => api("/mcp-sessions", "DELETE"))}
+              >
+                Revoke all ChatGPT access tokens
+              </button>
+            </section>
+          </>
+        )}
+        {view === "Connections" && (
+          <>
+            <p>
+              Confirm the linked identity and discovered accounts before
+              enabling a new connection.
+            </p>
+            <a className="button" href="/auth/cloudflare/start">
+              Add Cloudflare connection
+            </a>
+            <div className="cards">
+              {connections.map((c) => (
+                <article key={String(c.id)}>
+                  <h2>{c.identity}</h2>
+                  <span className="pill">{c.status}</span>
+                  <code>{c.id}</code>
+                  {accounts
+                    .filter((a) => a.connection_id === c.id)
+                    .map((a) => (
+                      <p key={String(a.account_id)}>
+                        {a.name}
+                        <code>{a.account_id}</code>
+                      </p>
+                    ))}
+                  {Boolean(c.owned) && (
+                    <div className="actions">
+                      {c.status === "pending_confirmation" && (
+                        <button
+                          disabled={busy}
+                          onClick={() =>
+                            run(() =>
+                              api("/connections/" + c.id + "/confirm", "POST"),
+                            )
+                          }
+                        >
+                          Confirm identity & accounts
+                        </button>
+                      )}
+                      <a href={"/auth/cloudflare/start?connection_id=" + c.id}>
+                        Reconnect same identity
+                      </a>
+                      <button
+                        disabled={busy}
+                        onClick={() =>
+                          run(() =>
+                            api("/connections/" + c.id + "/revoke", "POST"),
+                          )
+                        }
+                      >
+                        Revoke connection
+                      </button>
+                    </div>
+                  )}
+                </article>
+              ))}
+            </div>
+          </>
+        )}
+        {view === "Accounts" && (
+          <div className="cards">
+            {accounts.map((a) => (
+              <article key={String(a.connection_id) + a.account_id}>
+                <Target a={a} />
+                <p className="muted">
+                  Credential scopes: {a.scopes || "Not reported by provider"}
+                </p>
+                {connections.some(
+                  (c) => c.id === a.connection_id && Boolean(c.owned),
+                ) ? (
+                  <form
+                    onSubmit={(e) => {
+                      const b = data(e);
+                      run(() =>
+                        api("/accounts", "PATCH", {
+                          connection_id: a.connection_id,
+                          account_id: a.account_id,
+                          ...b,
+                        }),
+                      );
+                    }}
+                  >
+                    <label>
+                      Alias
+                      <input
+                        required
+                        name="alias"
+                        defaultValue={String(a.alias)}
+                        pattern="[a-zA-Z0-9_-]{1,50}"
+                      />
+                    </label>
+                    <label>
+                      Environment
+                      <select
+                        name="environment"
+                        defaultValue={String(a.environment)}
+                      >
+                        <option value="lab">Lab</option>
+                        <option value="production">Production</option>
+                      </select>
+                    </label>
+                    <button disabled={busy}>Save account settings</button>
+                  </form>
+                ) : (
+                  <p className="muted">
+                    Shared account. Settings are managed by the connection
+                    owner.
+                  </p>
+                )}
+              </article>
+            ))}
+          </div>
+        )}
+        {view === "Users & Access" && (
+          <>
+            <section>
+              <h2>Invite a workspace member</h2>
+              <form
+                className="inline"
+                onSubmit={(e) => {
+                  const b = data(e);
+                  run(() => api("/invitations", "POST", b));
+                }}
+              >
+                <label>
+                  Workspace
+                  <select name="workspace_id">
+                    {me.memberships
+                      .filter((m) => m.role === "owner")
+                      .map((m) => (
+                        <option key={String(m.workspace_id)}>
+                          {m.workspace_id}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Google email
+                  <input name="email" type="email" required />
+                </label>
+                <label>
+                  Role
+                  <select name="role">
+                    <option>viewer</option>
+                    <option>operator</option>
+                    <option>admin</option>
+                  </select>
+                </label>
+                <button disabled={busy}>Create invitation</button>
+              </form>
+              <p className="muted">
+                Invitations appear when the recipient signs in. Workspace roles
+                do not grant access to another member's credentials.
+              </p>
+              {access.invitations.map((i) => (
+                <p key={String(i.id)}>
+                  {i.workspace_id} · {i.role}{" "}
+                  <button
+                    disabled={busy}
+                    onClick={() =>
+                      run(() => api("/invitations/" + i.id + "/accept", "POST"))
+                    }
+                  >
+                    Accept invitation
+                  </button>
+                </p>
+              ))}
+              <Table
+                rows={access.memberships}
+                columns={["workspace_id", "email", "user_id", "role"]}
+              />
+              {access.memberships
+                .filter(
+                  (m) =>
+                    m.user_id !== me.user.id &&
+                    m.role !== "owner" &&
+                    me.memberships.some(
+                      (own) =>
+                        own.workspace_id === m.workspace_id &&
+                        own.role === "owner",
+                    ),
+                )
+                .map((m) => (
+                  <form
+                    className="inline"
+                    key={String(m.workspace_id) + m.user_id}
+                    onSubmit={(e) => {
+                      const b = data(e);
+                      run(() =>
+                        api("/memberships", "PATCH", {
+                          workspace_id: m.workspace_id,
+                          user_id: m.user_id,
+                          role: b.role,
+                        }),
+                      );
+                    }}
+                  >
+                    <label>
+                      {m.email}
+                      <select name="role" defaultValue={String(m.role)}>
+                        <option>viewer</option>
+                        <option>operator</option>
+                        <option>admin</option>
+                      </select>
+                    </label>
+                    <button disabled={busy}>Update role</button>
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        run(() =>
+                          api(
+                            "/memberships/" + m.workspace_id + "/" + m.user_id,
+                            "DELETE",
+                          ),
+                        )
+                      }
+                    >
+                      Remove member
+                    </button>
+                  </form>
+                ))}
+            </section>
+            <section>
+              <h2>Share one account</h2>
+              <form
+                className="inline"
+                onSubmit={(e) => {
+                  const b = data(e);
+                  const a = accounts.find(
+                    (a) => a.connection_id + "/" + a.account_id === b.target,
+                  );
+                  if (a)
+                    run(() =>
+                      api("/grants", "POST", {
+                        connection_id: a.connection_id,
+                        account_id: a.account_id,
+                        user_id: b.user_id,
+                        permission: b.permission,
+                      }),
+                    );
+                }}
+              >
+                <label>
+                  Target
+                  <select name="target">
+                    {accounts.map((a) => (
+                      <option
+                        key={String(a.connection_id) + a.account_id}
+                        value={a.connection_id + "/" + a.account_id}
+                      >
+                        {a.alias} · {a.account_id} · {a.connection_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Member
+                  <select name="user_id">
+                    {access.memberships
+                      .filter((m) => m.user_id !== me.user.id)
+                      .map((m) => (
+                        <option
+                          key={String(m.workspace_id) + m.user_id}
+                          value={String(m.user_id)}
+                        >
+                          {m.email} ({m.role})
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label>
+                  Permission
+                  <select name="permission">
+                    <option value="read">Read inventory</option>
+                    <option value="dns:write">DNS preview & apply</option>
+                  </select>
+                </label>
+                <button disabled={busy}>Grant account access</button>
+              </form>
+              {access.grants.map((g) => (
+                <article key={String(g.id)}>
+                  <p>
+                    {g.user_id} · {g.account_id} · {g.permission}
+                  </p>
+                  <button
+                    disabled={busy}
+                    onClick={() => run(() => api("/grants/" + g.id, "DELETE"))}
+                  >
+                    Revoke grant
+                  </button>
+                </article>
+              ))}
+            </section>
+          </>
+        )}
+        {view === "Approvals & Operations" && (
+          <>
+            <p>
+              Review the exact target and saved payload. Approval expires ten
+              minutes after preview. Execute an approved operation through
+              ChatGPT.
+            </p>
+            {operations.map((o) => (
+              <button
+                className="operation"
+                key={String(o.id)}
+                onClick={() =>
+                  run(async () => {
+                    setOp(await api<Op>("/operations/" + o.id));
+                    setConfirmation("");
+                  })
+                }
+              >
+                <span>
+                  {o.account_id}
+                  <code>{o.id}</code>
+                </span>
+                <span className="pill">{o.status}</span>
+              </button>
+            ))}
+            {op && (
+              <section>
+                <Target
+                  a={{
+                    connection_id: op.connection_id,
+                    account_id: op.account_id,
+                    alias: op.alias,
+                    environment: op.environment,
+                    name: op.alias,
+                  }}
+                />
+                <p>
+                  Zone: <code>{op.zone_id}</code>
+                </p>
+                <div className="diff">
+                  <div>
+                    <h3>Before</h3>
+                    <pre>{JSON.stringify(op.before, null, 2)}</pre>
+                  </div>
+                  <div>
+                    <h3>After</h3>
+                    <pre>{JSON.stringify(op.after, null, 2)}</pre>
+                  </div>
+                </div>
+                <p>
+                  State: {op.status} · Expires{" "}
+                  {new Date(op.expires_at * 1000).toLocaleString()}
+                </p>
+                {op.environment === "production" && (
+                  <label className="alert">
+                    Production: type the exact target to approve
+                    <code>
+                      {op.connection_id}/{op.account_id}/{op.zone_id}
+                    </code>
+                    <input
+                      value={confirmation}
+                      onChange={(e) => setConfirmation(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </label>
+                )}
+                {op.status === "pending" && (
+                  <div className="actions">
+                    {(["approve", "reject"] as const).map((decision) => (
+                      <button
+                        disabled={busy}
+                        key={decision}
+                        onClick={() =>
+                          run(async () =>
+                            setOp(
+                              await api<Op>(
+                                "/operations/" + op.operation_id + "/decision",
+                                "POST",
+                                { decision, confirmation },
+                              ),
+                            ),
+                          )
+                        }
+                      >
+                        {decision === "approve"
+                          ? "Approve this change"
+                          : "Reject"}
+                      </button>
+                    ))}
+                  </div>
+                )}
+                <pre>{JSON.stringify(op.result, null, 2)}</pre>
+                <small>Request {op.request_id}</small>
+              </section>
+            )}
+          </>
+        )}
+        {view === "Audit" && (
+          <>
+            <form
+              className="inline"
+              onSubmit={(e) => {
+                const b = data(e);
+                run(async () => {
+                  const q = new URLSearchParams(
+                    Object.entries(b)
+                      .filter(([, v]) => v)
+                      .map(([k, v]) => [k, String(v)]),
+                  );
+                  setEvents(await api<Row[]>("/audit?" + q));
+                }, false);
+              }}
+            >
+              <label>
+                Account ID
+                <input name="account_id" />
+              </label>
+              <label>
+                Request ID
+                <input name="request_id" />
+              </label>
+              <label>
+                Since (Unix seconds)
+                <input name="from" type="number" min="0" />
+              </label>
+              <button disabled={busy}>Filter</button>
+            </form>
+            <Table
+              rows={events}
+              columns={[
+                "created_at",
+                "user_id",
+                "action",
+                "account_id",
+                "result",
+                "request_id",
+              ]}
+            />
+          </>
+        )}
+      </main>
+    </div>
+  );
+}
+function Target({ a }: { a: Row }) {
+  return (
+    <div
+      className={
+        "target " + (a.environment === "production" ? "production" : "")
+      }
+    >
+      <strong>
+        {a.alias} · {a.name}
+      </strong>
+      <span className="pill">{a.environment}</span>
+      <code>Account {a.account_id}</code>
+      <code>Connection {a.connection_id}</code>
+    </div>
+  );
+}
+function Table({ rows, columns }: { rows: Row[]; columns: string[] }) {
+  return rows.length ? (
+    <div className="table">
+      <table>
+        <thead>
+          <tr>
+            {columns.map((c) => (
+              <th key={c}>{c.replaceAll("_", " ")}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={String(r.id ?? i)}>
+              {columns.map((c) => (
+                <td key={c}>
+                  {c === "created_at"
+                    ? new Date(Number(r[c]) * 1000).toLocaleString()
+                    : String(r[c] ?? "—")}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  ) : (
+    <p className="empty">No items to show.</p>
+  );
+}
+createRoot(document.getElementById("root")!).render(<App />);
