@@ -4,8 +4,17 @@ export const credentials = z.object({access_token:z.string(),refresh_token:z.str
 export type Credentials = z.infer<typeof credentials>;
 const envelope=z.object({success:z.boolean(),result:z.unknown(),result_info:z.object({page:z.number().optional(),total_pages:z.number().optional(),count:z.number().optional()}).optional()});
 export class Cloudflare {
- constructor(private token:string,private upstream:typeof fetch=fetch){}
+ constructor(private token:string,private upstream:typeof fetch=fetch,private gate?:{env:AppEnv;connection:string}){}
  async call(path:string,method='GET',body?:unknown):Promise<{result:unknown;result_info?:unknown}> {
+  if(!this.gate)return this.request(path,method,body);
+  const {env,connection}=this.gate,id=crypto.randomUUID();
+  await env.DB.prepare('DELETE FROM api_leases WHERE expires_at<=?').bind(now()).run();
+  const claimed=await env.DB.prepare('INSERT INTO api_leases SELECT ?,?,? WHERE (SELECT count(*) FROM api_leases WHERE connection_id=? AND expires_at>?)<4').bind(id,connection,now()+30,connection,now()).run();
+  if(!claimed.meta.changes)throw new Fault(429,'connection_concurrency_limit_retry_later');
+  try{return await this.request(path,method,body);}finally{await env.DB.prepare('DELETE FROM api_leases WHERE id=?').bind(id).run();}
+ }
+ 
+ async request(path:string,method='GET',body?:unknown):Promise<{result:unknown;result_info?:unknown}> {
   if(!/^\/(accounts|zones|user)(\/|\?|$)/.test(path))throw new Fault(400,'invalid_api_path');
   let response:Response;
   try { response=await this.upstream('https://api.cloudflare.com/client/v4'+path,{method,headers:{Authorization:`Bearer ${this.token}`,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),signal:AbortSignal.timeout(15000)}); }
@@ -41,5 +50,5 @@ export async function client(env:AppEnv,id:string):Promise<Cloudflare> {
   }catch {await env.DB.prepare('UPDATE cloudflare_connections SET status=\'reauth_required\' WHERE id=? AND refresh_lock=? AND status=\'refreshing\'').bind(id,lock).run();throw new Fault(401,'connection_requires_reauthentication');}
   finally {await env.DB.prepare('UPDATE cloudflare_connections SET refresh_lock=NULL,refresh_until=NULL WHERE id=? AND refresh_lock=?').bind(id,lock).run();}
  }
- return new Cloudflare(token.access_token);
+ return new Cloudflare(token.access_token,fetch,{env,connection:id});
 }

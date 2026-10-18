@@ -16,7 +16,7 @@ export async function preview(env:AppEnv,user:string,input:unknown,request:strin
  const digest=await hash(canonical(v));const existing=await env.DB.prepare('SELECT operation_id,request_hash FROM operation_keys WHERE user_id=? AND idempotency_key=?').bind(user,v.idempotency_key).first<{operation_id:string;request_hash:string}>();if(existing){if(existing.request_hash!==digest)throw new Fault(409,'idempotency_payload_mismatch');return operationStatus(env,user,existing.operation_id);}
  const cf=await client(env,v.connection_id);await cf.zone(v,v.zone_id);const before=await snapshot(cf,{...v,payload});
  if(!v.record_id && z.array(z.unknown()).parse(before).length)throw new Fault(409,'record_already_exists_use_update');
- if(v.record_id){const old=recordShape(before);if(old.name!==v.record.name || old.type!==v.record.type)throw new Fault(400,'record_rename_or_type_change_requires_separate_flow');}
+ if(v.record_id){const old=recordShape(before);if(sameRecord(old,v.record))throw new Fault(409,'dns_change_is_noop');if(old.name!==v.record.name || old.type!==v.record.type)throw new Fault(400,'record_rename_or_type_change_requires_separate_flow');}
  const id=crypto.randomUUID();await authorize(env,user,v,'dns:write');
  await env.DB.batch([env.DB.prepare('INSERT INTO operations (id,user_id,connection_id,account_id,zone_id,record_id,payload,before_json,status,expires_at,created_at,request_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)').bind(id,user,v.connection_id,v.account_id,v.zone_id,v.record_id??null,payload,canonical(before),'pending',now()+600,now(),request),env.DB.prepare('INSERT INTO operation_keys VALUES (?,?,?,?)').bind(user,v.idempotency_key,id,digest)]);
  await audit(env,user,'dns.preview',request,v,id);return operationStatus(env,user,id);
@@ -42,8 +42,8 @@ export async function apply(env:AppEnv,user:string,id:string,request:string){
  if(row.status==='applying' || row.status==='uncertain')return verify(env,row,cf,request);
  if(row.status!=='approved' || row.expires_at<=now())throw new Fault(409,'valid_approval_required');
  const p=desired(row),key=p.type+':'+p.name;
- await env.DB.prepare('INSERT OR IGNORE INTO dns_locks VALUES (?,?,?,?)').bind(row.connection_id,row.zone_id,key,id).run();
- const lock=await env.DB.prepare('SELECT operation_id FROM dns_locks WHERE connection_id=? AND zone_id=? AND record_key=?').bind(row.connection_id,row.zone_id,key).first<{operation_id:string}>();if(lock?.operation_id!==id)throw new Fault(409,'dns_target_operation_in_progress');
+ await env.DB.prepare('INSERT OR IGNORE INTO dns_locks VALUES (?,?,?,?)').bind(row.account_id,row.zone_id,key,id).run();
+ const lock=await env.DB.prepare('SELECT operation_id FROM dns_locks WHERE account_id=? AND zone_id=? AND record_key=?').bind(row.account_id,row.zone_id,key).first<{operation_id:string}>();if(lock?.operation_id!==id)throw new Fault(409,'dns_target_operation_in_progress');
  const claim=await env.DB.prepare(`UPDATE operations SET status='applying' WHERE id=? AND status='approved' AND expires_at>? AND EXISTS (SELECT 1 FROM approvals WHERE operation_id=? AND user_id=? AND consumed_at IS NULL) RETURNING id`).bind(id,now(),id,user).first();
  if(!claim)return operationStatus(env,user,id);
  await env.DB.prepare('UPDATE approvals SET consumed_at=? WHERE operation_id=? AND consumed_at IS NULL').bind(now(),id).run();
