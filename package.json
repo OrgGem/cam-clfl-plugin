@@ -8,13 +8,15 @@
     "build": "vite build apps/ui --outDir ../../dist/ui --emptyOutDir && tsc -p tsconfig.build.json",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "check": "npm run typecheck && npm test && npm run build && npm run validate:plugin",
+    "check": "npm run typecheck && npm test && npm run build && npm run validate:plugin && npm run smoke:stdio && npm run smoke:local",
     "start": "node dist/node/apps/local/src/cli.js ui",
     "mcp": "node dist/node/apps/local/src/cli.js mcp",
     "test:e2e": "npm run build && playwright test",
     "validate:plugin": "node scripts/validate-plugin.mjs",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "smoke:stdio": "node scripts/smoke-stdio.mjs",
+    "smoke:local": "node scripts/smoke-local.mjs"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.5",

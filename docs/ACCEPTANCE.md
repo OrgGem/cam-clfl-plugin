@@ -1,0 +1,17 @@
+# Acceptance gate
+
+| Requirement                    | Automated evidence                                                                                                     | Live/manual gate                                                                  |
+| ------------------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| No vendor token server         | Transport destinations constrained to Cloudflare; token-free state/UI/MCP assertions                                   | Inspect device network while connecting/reading/writing                           |
+| Two identities, three accounts | Fake OAuth userinfo/discovery, account routing and browser fixture                                                     | Authorize two real Cloudflare identities                                          |
+| Safe credential custody        | Production SystemVault adapter, strict metadata schema, no plaintext fallback                                          | Unlock/persist/restart/revoke on each OS backend                                  |
+| OAuth PKCE                     | S256, no client secret, one-time browser state and callback tests                                                      | Real public-client redirect/consent/refresh                                       |
+| Local MCP                      | In-memory protocol tests and actual compiled stdio handshake                                                           | Install in the intended local MCP host                                            |
+| Embedded ChatGPT UI only       | Documentation analysis selects companion fallback                                                                      | Not established; prove invocation, CORS and durable vault before claiming support |
+| Routing/revoke/refresh         | ID swapping rejection, allowlists, concurrent refresh, independent revoke, failed refresh                              | Same-named resources across real accounts and external token revoke               |
+| Local-only approval            | Browser production confirmation and no approval tool                                                                   | Approve a disposable lab DNS record on device                                     |
+| Single-attempt DNS             | Concurrent apply, persisted applying-state reconciliation, timeout-after-commit, conflict, PATCH metadata preservation | Staging fault injection and process termination before/after write                |
+| Browser UI                     | Two identities/three accounts → inventory → production preview/approval/apply/readback                                 | Actual vault availability and OS browser launch                                   |
+| API/DNS verification           | Fake API readback                                                                                                      | Authoritative/public DNS after appropriate TTL                                    |
+
+Current status: automated fixture/protocol/compiled-runtime checks implemented; live OAuth and real DNS tests NOT RUN. No real credentials were available or cloud resources changed during this implementation. A passing test run is not a claim of ChatGPT web installability.
