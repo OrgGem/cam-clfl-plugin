@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { createRemoteJWKSet, jwtVerify } from "jose";
 import { z } from "zod";
 import {
+  boundedJson,
   AppEnv,
   Fault,
   hash,
@@ -197,7 +198,7 @@ auth.get("/auth/:provider/callback", async (c) => {
       id_token: z.string().optional(),
       scope: z.string().optional(),
     })
-    .parse(await response.json());
+    .parse(await boundedJson(response, 65536));
   if (provider === "google") {
     if (!result.id_token) throw new Fault(401, "missing_id_token");
     const { payload } = await jwtVerify(
@@ -280,7 +281,7 @@ auth.get("/auth/:provider/callback", async (c) => {
   if (!identityResponse.ok) throw new Fault(400, "cloudflare_identity_failed");
   const identity = z
     .object({ sub: z.string(), email: z.string().optional() })
-    .parse(await identityResponse.json());
+    .parse(await boundedJson(identityResponse, 65536));
   const accounts: z.infer<typeof account>[] = [];
   let page = 1;
   const account = z.object({
