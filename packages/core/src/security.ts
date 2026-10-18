@@ -22,7 +22,7 @@ export const dnsSchema = z.object({type:z.enum(['A','AAAA','CNAME','TXT','MX']),
 export type Target = z.infer<typeof targetSchema>;
 export function canonical(v: unknown): string { if(Array.isArray(v))return '['+v.map(canonical).join(',')+']'; if(v && typeof v==='object')return '{'+Object.entries(v).sort(([a],[b])=>a.localeCompare(b)).map(([k,x])=>JSON.stringify(k)+':'+canonical(x)).join(',')+'}';return JSON.stringify(v); }
 export function recordShape(v: unknown) { const r=z.object({id:z.string().optional(),type:z.string(),name:z.string(),content:z.string(),ttl:z.number(),proxied:z.boolean().optional(),priority:z.number().optional(),modified_on:z.string().optional()}).parse(v); return r; }
-export type AppEnv = Env & {GOOGLE_CLIENT_SECRET:string; CF_CLIENT_SECRET:string; CREDENTIAL_KEYS:string};
+export type AppEnv = { [K in keyof Env]: Env[K] extends string ? string : Env[K] } & {GOOGLE_CLIENT_SECRET:string; CF_CLIENT_SECRET:string; CREDENTIAL_KEYS:string};
 export function encryptionKey(env: AppEnv, version: string) { const keys=z.record(z.string(),z.string()).parse(JSON.parse(env.CREDENTIAL_KEYS)); if(!keys[version])throw new Fault(503,'encryption_key_unavailable');return keys[version]; }
 export async function audit(env: AppEnv, user: string, action: string, request: string, target?: Target, operation?: string, result='ok') {
  await env.DB.prepare('INSERT INTO audit_events VALUES (?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user,action,target?.connection_id??null,target?.account_id??null,operation??null,result,request,now()).run();

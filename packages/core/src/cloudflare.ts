@@ -32,7 +32,7 @@ export async function client(env:AppEnv,id:string):Promise<Cloudflare> {
    if(latest && latest.expires_at>now()+60)token=credentials.parse(await open(latest.credential,encryptionKey(env,latest.key_version),id));
    else {
     await env.DB.prepare('UPDATE cloudflare_connections SET status=\'refreshing\' WHERE id=? AND refresh_lock=?').bind(id,lock).run();
-    const response=await fetch('https://oauth.cloudflare.com/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:'Basic '+btoa(env.CF_CLIENT_ID+':'+env.CF_CLIENT_SECRET)},body:new URLSearchParams({grant_type:'refresh_token',refresh_token:token.refresh_token}),signal:AbortSignal.timeout(15000)});
+    const response=await fetch('https://dash.cloudflare.com/oauth2/token',{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded',Authorization:'Basic '+btoa(env.CF_CLIENT_ID+':'+env.CF_CLIENT_SECRET)},body:new URLSearchParams({grant_type:'refresh_token',refresh_token:token.refresh_token}),signal:AbortSignal.timeout(15000)});
     if(!response.ok)throw new Fault(401,'connection_requires_reauthentication');
     const result=z.object({access_token:z.string(),refresh_token:z.string(),expires_in:z.number(),scope:z.string().optional()}).parse(await response.json());
     token={access_token:result.access_token,refresh_token:result.refresh_token,scope:result.scope??token.scope};
