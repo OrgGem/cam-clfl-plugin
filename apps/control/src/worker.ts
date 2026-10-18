@@ -1,19 +1,78 @@
-import {Hono} from 'hono';
-import {bodyLimit} from 'hono/body-limit';
-import {z} from 'zod';
-import {Fault} from '../../../packages/core/src/security';
-import {auth,Context,sessionUser,sessionCookie} from './auth';
-import {api} from './api';
-import {mcp} from '../../gateway/src/mcp';
-const app=new Hono<Context>();
-app.use('*',bodyLimit({maxSize:65536,onError:c=>c.json({error:'body_too_large'},413)}));
-app.use('*',async(c,next)=>{c.set('requestId',crypto.randomUUID());c.header('X-Request-ID',c.get('requestId'));c.header('Cache-Control','no-store');c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','no-referrer');c.header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");if(['POST','PUT','PATCH','DELETE'].includes(c.req.method) && (c.req.path.startsWith('/api/') || c.req.path==='/oauth/authorize') && c.req.header('Origin')!==c.env.APP_ORIGIN)throw new Fault(403,'invalid_origin');if(Number(c.req.header('Content-Length')??0)>65536)throw new Fault(413,'body_too_large');await next();});
-app.onError((err,c)=>{const status=err instanceof Fault?err.status:err instanceof z.ZodError?400:500;const error=err instanceof Fault?err.code:status===400?'invalid_input':'internal_error';if(status===401)c.header('WWW-Authenticate',`Bearer resource_metadata="${c.env.APP_ORIGIN}/.well-known/oauth-protected-resource/mcp"`);return c.json({error,request_id:c.get('requestId')},status as 400);});
-app.route('/',auth);
-app.use('/api/*',async(c,next)=>{c.set('user',await sessionUser(c.env,sessionCookie(c.env,c)));await next();});
-app.get('/api/me',async c=>c.json({user:await c.env.DB.prepare('SELECT id,email FROM users WHERE id=?').bind(c.get('user')).first(),memberships:(await c.env.DB.prepare('SELECT workspace_id,role FROM memberships WHERE user_id=?').bind(c.get('user')).all()).results}));
-app.route('/api',api);
-app.all('/mcp',c=>mcp(c.req.raw,c.env,c.get('requestId')));
-app.get('/health',c=>c.json({ok:true}));
-app.all('*',c=>c.env.ASSETS.fetch(c.req.raw));
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { z } from "zod";
+import { Fault } from "../../../packages/core/src/security";
+import { auth, Context, sessionUser, sessionCookie } from "./auth";
+import { api } from "./api";
+import { mcp } from "../../gateway/src/mcp";
+const app = new Hono<Context>();
+app.use(
+  "*",
+  bodyLimit({
+    maxSize: 65536,
+    onError: (c) => c.json({ error: "body_too_large" }, 413),
+  }),
+);
+app.use("*", async (c, next) => {
+  c.set("requestId", crypto.randomUUID());
+  c.header("X-Request-ID", c.get("requestId"));
+  c.header("Cache-Control", "no-store");
+  c.header("X-Content-Type-Options", "nosniff");
+  c.header("Referrer-Policy", "no-referrer");
+  const callbackOrigins = c.env.MCP_REDIRECT_URIS.split(",")
+    .map((uri) => new URL(uri).origin)
+    .join(" ");
+  c.header(
+    "Content-Security-Policy",
+    `default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self' ${callbackOrigins}`,
+  );
+  if (
+    ["POST", "PUT", "PATCH", "DELETE"].includes(c.req.method) &&
+    (c.req.path.startsWith("/api/") || c.req.path === "/oauth/authorize") &&
+    c.req.header("Origin") !== c.env.APP_ORIGIN
+  )
+    throw new Fault(403, "invalid_origin");
+  if (Number(c.req.header("Content-Length") ?? 0) > 65536)
+    throw new Fault(413, "body_too_large");
+  await next();
+});
+app.onError((err, c) => {
+  const status =
+    err instanceof Fault ? err.status : err instanceof z.ZodError ? 400 : 500;
+  const error =
+    err instanceof Fault
+      ? err.code
+      : status === 400
+        ? "invalid_input"
+        : "internal_error";
+  if (status === 401)
+    c.header(
+      "WWW-Authenticate",
+      `Bearer resource_metadata="${c.env.APP_ORIGIN}/.well-known/oauth-protected-resource/mcp"`,
+    );
+  return c.json({ error, request_id: c.get("requestId") }, status as 400);
+});
+app.route("/", auth);
+app.use("/api/*", async (c, next) => {
+  c.set("user", await sessionUser(c.env, sessionCookie(c.env, c)));
+  await next();
+});
+app.get("/api/me", async (c) =>
+  c.json({
+    user: await c.env.DB.prepare("SELECT id,email FROM users WHERE id=?")
+      .bind(c.get("user"))
+      .first(),
+    memberships: (
+      await c.env.DB.prepare(
+        "SELECT workspace_id,role FROM memberships WHERE user_id=?",
+      )
+        .bind(c.get("user"))
+        .all()
+    ).results,
+  }),
+);
+app.route("/api", api);
+app.all("/mcp", (c) => mcp(c.req.raw, c.env, c.get("requestId")));
+app.get("/health", (c) => c.json({ ok: true }));
+app.all("*", (c) => c.env.ASSETS.fetch(c.req.raw));
 export default app;
