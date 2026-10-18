@@ -22,7 +22,7 @@ For DNS, request preview, approve in the local Changes UI and apply the saved op
 
 ## Install a downloaded marketplace ZIP
 
-Download and verify `gem-cloudflare-marketplace.zip` from the GitHub prerelease, then extract it into a permanent directory. The folder contains `.agents/plugins/marketplace.json` and a self-contained `plugin/` directory.
+Download [gem-cloudflare-marketplace.zip](https://github.com/OrgGem/cam-clfl-plugin/raw/refs/heads/marketplace/downloads/gem-cloudflare-marketplace.zip), verify it against [SHA256SUMS.txt](https://github.com/OrgGem/cam-clfl-plugin/blob/marketplace/downloads/SHA256SUMS.txt), then extract it into a permanent directory. The folder contains `.agents/plugins/marketplace.json` and a self-contained `plugin/` directory.
 
 ```sh
 codex plugin marketplace add /ABSOLUTE/EXTRACTED/MARKETPLACE
