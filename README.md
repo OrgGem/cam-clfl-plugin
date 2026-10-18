@@ -31,6 +31,10 @@ Open the **private launch URL printed in the terminal**. It contains a one-time 
 
 Private/public OAuth client _visibility_ is distinct from public-client token authentication. A private-visibility client only accepts members of its owning Cloudflare account. Public visibility/domain verification is an account-owner decision, not an automatic app action.
 
+## Connect ChatGPT in a browser
+
+Use OpenAI Secure MCP Tunnel to forward requests to the companion on your device, subject to account/workspace access. Follow [the ChatGPT web setup](docs/CHATGPT-WEB.md). The repository does not create a tunnel or install a plugin into your account automatically. Cloudflare tokens stay local; tool results still reach ChatGPT.
+
 ## Connect a local MCP host
 
 Keep the UI and MCP processes under the same OS user and data directory. Use an absolute checkout path:
