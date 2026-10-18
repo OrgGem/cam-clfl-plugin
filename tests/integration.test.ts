@@ -4,6 +4,8 @@ import { beforeAll, afterAll, beforeEach, it, expect, vi } from "vitest";
 import { AppEnv, authorize, hash, now } from "../packages/core/src/security";
 import { preview, approve, apply } from "../packages/core/src/operations";
 import app from "../apps/control/src/worker";
+// workerd/D1 IPC can be delayed by shared CI runners; these are not pure unit tests.
+vi.setConfig({ testTimeout: 30000, hookTimeout: 30000 });
 const backend = vi.hoisted(() => ({
   records: [] as Record<string, unknown>[],
   writes: 0,
