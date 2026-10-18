@@ -1,10 +1,22 @@
 {
- "$schema":"node_modules/wrangler/config-schema.json",
- "name":"gem-cloudflare-gateway-staging",
- "main":"apps/gateway/src/worker.ts",
- "compatibility_date":"2026-10-18",
- "compatibility_flags":["nodejs_compat"],
- "d1_databases":[{"binding":"DB","database_name":"gem-cloudflare-manager-staging","database_id":"00000000-0000-0000-0000-000000000000","migrations_dir":"migrations"}],
- "vars":{"APP_ORIGIN":"https://configure-me.invalid","MCP_CLIENT_ID":"chatgpt","CF_CLIENT_ID":"configure-me","KEY_VERSION":"v1"},
- "observability":{"enabled":true,"head_sampling_rate":1}
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "gem-cloudflare-gateway-staging",
+  "main": "apps/gateway/src/worker.ts",
+  "compatibility_date": "2026-10-18",
+  "compatibility_flags": ["nodejs_compat"],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "gem-cloudflare-manager-staging",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "vars": {
+    "APP_ORIGIN": "https://configure-me.invalid",
+    "MCP_CLIENT_ID": "chatgpt",
+    "CF_CLIENT_ID": "configure-me",
+    "KEY_VERSION": "v1",
+  },
+  "observability": { "enabled": true, "head_sampling_rate": 1 },
 }
